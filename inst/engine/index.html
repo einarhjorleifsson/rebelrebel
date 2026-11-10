@@ -83,6 +83,12 @@
   .rb-hover { pointer-events: none; }
   .rb-hover .maplibregl-popup-content { padding: 3px 8px; background: rgba(255,255,255,.93); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
   .rb-hover .maplibregl-popup-tip { display: none; }
+  /* a feature's row on a click (a layer function's popup): a table of its columns, scrolling when long */
+  .rr-row-popup .rr-row-body { max-height: min(55vh, 420px); overflow-y: auto; margin-top: 4px; }
+  table.rr-row { border-collapse: collapse; font-size: 13px; }
+  table.rr-row th { text-align: left; font-weight: normal; color: #5a6470; padding: 1px 10px 1px 0; vertical-align: top; white-space: nowrap; }
+  table.rr-row td { padding: 1px 0; word-break: break-word; }
+  img.rr-thumb { max-width: 220px; max-height: 160px; display: block; }
   /* the notes (rr_serve(notes = )): pins on the map, a thread each, listed in their group */
   #n-add.on { background: var(--bar); color: #fff; border-color: var(--bar); }
   #n-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; }
@@ -239,6 +245,7 @@ const ENGINE_TEXTS = {
   chooseAll: "all", chooseAllTip: "Show every value", chooseBack: "The previous one", chooseNext: "The next one",
   legendTip: "The colour scale on a log axis, and below it the cells in view: values below the floor and above the cap in the end bars",
   yes: "yes", no: "no",
+  rowLoading: "loading the row…", rowNone: "the row did not come", rowYes: "yes", rowNo: "no", rowVideo: "video",
   gTime: "Time", tVessel: "Group", tSpan: "Span", tCols: "Columns", tMarks: "Marks", tWholeBtn: "Whole span", tWholeTip: "Show the whole span; a double click on the chart does the same",
   tWhole: "whole ({1})", tLoading: "loading…", tFailed: "the rows did not come: {1}",
   tWindow: "{1} to {2}{3} · {4} rows", tThinned: "1 in {1} drawn on the map", tNone: "nothing in this span",
@@ -1450,10 +1457,51 @@ function featureHtml(l, p, fields = true) {
   };
   return `<b>${esc(p[l.popup.title])}</b>${(fields ? l.popup.fields ?? [] : []).map(f => line(tr(f.label), val(f))).join("")}`;
 }
+// A row as a table: a column a line, its value in the page's language (numbers, yes and no, a dash where missing),
+// times as the data hold them, a web address a link, a picture's address the picture, a video's a link to it
+function rowValue(c) {
+  const v = c.value;
+  if (v === null || v === undefined || v === "") return "\u2014";
+  // a whole number as it is (an id is not 1,131), a fraction to six significant digits in the page's language
+  if (c.type === "number" || c.type === "integer") {
+    const n = +v;
+    return Number.isInteger(n) ? String(n) : n.toLocaleString(loc(), { maximumSignificantDigits: 6, useGrouping: false });
+  }
+  if (c.type === "logical") return tr(v ? "rowYes" : "rowNo");
+  const t = String(v);
+  if (/^https?:\/\//i.test(t)) {
+    if (/\.(jpe?g|png|webp|gif)(\?|#|$)/i.test(t)) return `<a href="${esc(t)}" target="_blank" rel="noopener"><img class="rr-thumb" src="${esc(t)}" alt="" loading="lazy"></a>`;
+    if (/\.(mp4|webm)(\?|#|$)/i.test(t) || /(youtube\.com|youtu\.be|vimeo\.com)\//i.test(t)) return `<a href="${esc(t)}" target="_blank" rel="noopener">\u25B6 ${esc(tr("rowVideo"))}</a>`;
+    return `<a href="${esc(t)}" target="_blank" rel="noopener">${esc(t)}</a>`;
+  }
+  return esc(t);
+}
+// a column's name as the data's dictionary or the call gives it, its unit beside it and its description behind it; a
+// code with its label
+function rowHtml(cols) {
+  const th = c => `<th${c.description ? ` title="${esc(c.description)}"` : ""}>${esc(c.label ?? c.name)}${c.unit ? ` (${esc(c.unit)})` : ""}</th>`;
+  const td = c => `<td>${rowValue(c)}${c.code ? ` \u00b7 ${esc(c.code)}` : ""}</td>`;
+  return `<table class="rr-row">${cols.map(c => `<tr>${th(c)}${td(c)}</tr>`).join("")}</table>`;
+}
 // A click on a feature: its title and fields. Registered top layer first, so the topmost feature under the click speaks
 function featurePopup(l, e) {
   popup?.remove();
   const box = document.createElement("div"), p = e.features[0].properties;
+  if (l.popup.row && p.rr_row !== undefined && !(VERDICTS && l.popup.verdict)) {
+    // the row as a table, fetched on the click: from the server, or in a bundle from the layer's rows file
+    box.className = "rr-row-popup";
+    box.innerHTML = `${featureHtml(l, p, false)}<div class="rr-row-body">${esc(tr("rowLoading"))}</div>`;
+    const body = box.querySelector(".rr-row-body");
+    (BUNDLE ? bundleLoad(`data/${l.id}_rows`).then(d => {
+      const v = d.rows[String(p.rr_row)];
+      return v ? { columns: d.cols.map((c, i) => ({ ...c, value: v[i] ?? null, code: c.codes?.[String(v[i])] })) } : null;
+    }) : fetch(`/row/${l.id}/${p.rr_row}`).then(r => r.ok ? r.json() : null))
+      .then(r => { body.innerHTML = r ? rowHtml(r.columns) : esc(tr("rowNone")); })
+      .catch(() => { body.innerHTML = esc(tr("rowNone")); });
+    popup = new maplibregl.Popup({ closeButton: true, maxWidth: l.popup.maxWidth ?? "360px" }).setLngLat(e.lngLat)
+      .setDOMContent(box).addTo(map);
+    return;
+  }
   if (VERDICTS && l.popup.verdict) {                                 // the questions under the title, the fields after
     const title = featureHtml(l, p, false), rest = document.createElement("div");
     box.className = "rb-verdict-popup";

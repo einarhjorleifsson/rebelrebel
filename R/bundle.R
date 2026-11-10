@@ -231,6 +231,36 @@ rr_bundle <- function(
     )
   }
 
+  # a layer's rows for its clicks, whole, under a guard on their size (a server reads them a row at a time)
+  rows_written <- character()
+  for (lc in config$layers) {
+    reader <- layers[[lc$id]]$row
+    if (!is.function(reader)) {
+      next
+    }
+    r <- reader()
+    cells <- nrow(r$rows) * length(r$cols)
+    if (cells > 2e6) {
+      message(sprintf(
+        "Layer %s: its %s rows are not written (%s values, more than 2 million): a click shows its title alone.",
+        lc$id, format(nrow(r$rows), big.mark = ","), format(cells, big.mark = ",")
+      ))
+      next
+    }
+    vals <- lapply(r$cols, function(cc) r$rows[[cc$name]])
+    rows <- stats::setNames(
+      lapply(seq_len(nrow(r$rows)), function(i) lapply(vals, function(v) if (is.na(v[i])) NULL else v[i])),
+      as.character(r$rows$rr_row)
+    )
+    dir.create(file.path(dir, "data"), showWarnings = FALSE)
+    writeLines(
+      enc2utf8(sprintf('RB_BUNDLE("data/%s_rows",%s);', lc$id, .rr_map_json(list(cols = r$cols, rows = rows)))),
+      file.path(dir, "data", paste0(lc$id, "_rows.js")),
+      useBytes = TRUE
+    )
+    rows_written <- c(rows_written, lc$id)
+  }
+
   bundle <- list(
     meta = list(engine = .rr_map_engine, layers = Filter(Negate(is.null), .rr_map_metas(layers[keep]))),
     tiles = folder,

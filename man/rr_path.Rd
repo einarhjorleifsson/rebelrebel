@@ -20,6 +20,8 @@ rr_path(
   stretch = NULL,
   legend = TRUE,
   popup = TRUE,
+  labels = NULL,
+  codes = NULL,
   hover = NULL,
   choose = NULL,
   name = NULL,
@@ -66,7 +68,16 @@ values).}
 
 \item{legend}{Whether the layer has a legend.}
 
-\item{popup}{The columns a click shows, written bare; \code{TRUE}, every column; \code{FALSE}, no popup.}
+\item{popup}{The columns a click shows, written bare; \code{TRUE}, every column; \code{FALSE}, no popup. A click shows the
+row as a table, read from the server (a bundle carries the rows): a column's name, its unit beside it and its
+description behind it, where the data's dictionary or \code{labels} give them.}
+
+\item{labels}{The columns' names as the popup shows them, in place of the data's: \code{c(speed = "Speed (knots)")}. By
+default a data frame's column attributes (\code{label}, \code{units}) or a parquet file's own dictionary (an entry of
+data-dict.tidyverse.org's format in its metadata, as \code{\link[=rr_example]{rr_example()}}'s files hold), else the column's name.}
+
+\item{codes}{The labels of a coded column's values, shown beside each code: a named list by column, each a named
+vector (\code{c("6" = "bottom trawl")}) or a table of code and label; by default the dictionary's, where it has them.}
 
 \item{hover}{A column whose value is shown beside the pointer.}
 

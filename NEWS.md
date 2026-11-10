@@ -1,3 +1,14 @@
+# rebelrebel 2026.11.10.3
+
+* A click shows the feature's row as a table: the tiles carry the row's number and title only, and the server answers
+  `/row/<layer>/<n>` with the columns `popup` names (2-3 ms a click); a bundle writes a layer's rows beside its tiles,
+  up to 2 million values. Whole numbers as they are, fractions to six significant digits in the page's language, yes
+  and no, a dash where missing; a web address a link, a picture's address the picture, a video's a link.
+* `labels` and `codes` in every layer function: a column's name, unit and description, and a coded column's labels,
+  by default from the data (a data frame's `label` and `units` attributes, or a parquet file's own dictionary in
+  data-dict.tidyverse.org's format).
+* `rr_path()` takes a number as its order (a sequence, a distance along a transect) as well as a time.
+
 # rebelrebel 2026.11.10.2
 
 * The layer functions, built with the pipe: `rr_point()`, `rr_path()` (rows joined in time, a line per `group`, one

@@ -9,7 +9,7 @@ test_that("every layer function takes its arguments in the plan's one order", {
     "map", "data", "lon", "lat", "lon_end", "lat_end", "group", "time", "max_gap_s", "elevation", "of", "cell", "fun",
     "colour", "fill", "size", "linewidth", "opacity", "label",
     "palette", "limits", "breaks", "stretch", "legend",
-    "popup", "hover", "choose",
+    "popup", "labels", "codes", "hover", "choose",
     "name", "info", "section", "visible",
     "minzoom", "maxzoom", "..."
   )
@@ -122,10 +122,11 @@ test_that("popup, hover and the sidebar", {
   expect_equal(l$minzoom, 6)
   expect_equal(l$popup$title, "vid")
   expect_equal(unlist(l$popup$hover), "survey_pings-dot")
-  expect_equal(vapply(l$popup$fields, `[[`, "", "field"), "speed")
+  expect_true(l$popup$row)
+  expect_equal(vapply(m$layers$survey_pings$row(1)$cols, `[[`, "", "name"), c("vid", "speed"))
   # every column by default, none with FALSE
   expect_setequal(
-    c(layer(rr_point(d))$popup$title, vapply(layer(rr_point(d))$popup$fields, `[[`, "", "field")),
+    vapply(rr_point(d)$layers$points$row(1)$cols, `[[`, "", "name"),
     c("vid", "speed", "heading", "time", "behaviour")
   )
   expect_null(layer(rr_point(d, popup = FALSE))$popup)
@@ -199,4 +200,84 @@ test_that("paths: rows joined in time, a line per group, broken at silences and 
   expect_error(rr_path(d, time = nope), "no column nope")
   expect_error(rr_path(rr_example("trawlsurveytows"), time = id.lgs), "rr_line")
   expect_error(rr_path(d, time = time_stamp, colour = c(behaviour, speed)), "one column")
+})
+
+test_that("a click shows the row: read from the server by its number, or from a bundle's rows file", {
+  skip_if_no_spatial()
+  d <- data.frame(
+    lon = c(-22, -21.5), lat = c(64, 64.2), station = c("A1", "B2"), depth = c(120.25, NA),
+    when = as.POSIXct(c("2019-03-01 10:00:00", "2019-03-02 11:30:00"), tz = "UTC"), ok = c(TRUE, FALSE),
+    photo = c("https://example.org/a.jpg", NA), n = c(3L, 4L)
+  )
+  m <- rr_point(d, popup = c(station, depth, when, ok, photo, n))
+  l <- layer(m)
+  expect_true(l$popup$row)
+  expect_equal(l$popup$title, "station")
+  expect_null(l$popup$fields)
+  # the tiles carry the number and the title, not the other columns
+  expect_true(is.function(m$layers$points$row))
+  app <- .rr_map_app(m)
+  get <- function(path) app$call(list(REQUEST_METHOD = "GET", PATH_INFO = path, QUERY_STRING = ""))
+  r <- get("/row/points/2")
+  expect_equal(r$status, 200L)
+  v <- jsonlite::fromJSON(r$body, simplifyVector = FALSE)$columns
+  expect_equal(vapply(v, `[[`, "", "name"), c("station", "depth", "when", "ok", "photo", "n"))
+  expect_equal(vapply(v, `[[`, "", "type"), c("text", "number", "time", "logical", "text", "integer"))
+  expect_equal(v[[1]]$value, "B2")
+  expect_null(v[[2]]$value) # missing
+  expect_equal(v[[3]]$value, "2019-03-02 11:30:00")
+  expect_false(v[[4]]$value)
+  expect_equal(get("/row/points/9")$status, 404L)
+  expect_equal(get("/row/nope/1")$status, 404L)
+  # no popup, no rows
+  expect_null(rr_point(d, popup = FALSE)$layers$points$row)
+  # a bundle writes the rows beside its tiles
+  dir <- tempfile()
+  rr_bundle(m, dir, maxzoom = 2)
+  js <- readLines(file.path(dir, "data", "points_rows.js"), encoding = "UTF-8")
+  expect_match(js[1], '^RB_BUNDLE\\("data/points_rows",')
+  b <- jsonlite::fromJSON(sub('^RB_BUNDLE\\("data/points_rows",(.*)\\);$', "\\1", paste(js, collapse = "")), simplifyVector = FALSE)
+  expect_equal(b$rows[["1"]][[1]], "A1")
+  expect_equal(b$rows[["1"]][[5]], "https://example.org/a.jpg")
+  # the page has the table's code and texts
+  page <- .rr_map_page("{}")
+  expect_match(page, "function rowHtml(cols)", fixed = TRUE)
+  expect_match(page, "fetch(`/row/${l.id}/${p.rr_row}`)", fixed = TRUE)
+})
+
+test_that("a click's row: names, units and descriptions from the data's dictionary or the call, codes with their labels", {
+  skip_if_no_spatial()
+  # a parquet file's own dictionary: the survey's speed in knots, its time described
+  m <- rr_point(rr_example("trawlsurvey"), popup = c(vid, speed, time))
+  cols <- m$layers$points$row(1)$cols
+  speed <- Filter(function(x) x$name == "speed", cols)[[1]]
+  expect_equal(speed$unit, "knots")
+  expect_match(speed$description, "Speed over ground")
+  expect_match(Filter(function(x) x$name == "time", cols)[[1]]$description, "UTC")
+  # a data frame's column attributes, and the call's labels and codes over them
+  d <- data.frame(lon = c(-22, -21), lat = c(64, 64.1), gear = c(6L, 9L), depth = c(120, 85))
+  attr(d$depth, "label") <- "Bottom depth"
+  attr(d$depth, "units") <- "m"
+  m2 <- rr_point(d, popup = c(gear, depth), codes = list(gear = data.frame(code = c(6, 9), label = c("bottom trawl", "longline"))))
+  app <- .rr_map_app(m2)
+  v <- jsonlite::fromJSON(app$call(list(REQUEST_METHOD = "GET", PATH_INFO = "/row/points/2", QUERY_STRING = ""))$body,
+                          simplifyVector = FALSE)$columns
+  expect_equal(v[[1]]$code, "longline")
+  expect_equal(c(v[[2]]$label, v[[2]]$unit), c("Bottom depth", "m"))
+  m3 <- rr_point(d, popup = c(gear, depth), labels = c(depth = "Depth of the haul (m)"), codes = list(gear = c("6" = "bottom trawl")))
+  r3 <- m3$layers$points$row(1)$cols
+  expect_equal(r3[[2]]$label, "Depth of the haul (m)")
+  expect_null(r3[[2]]$unit) # the call's label says it all
+  expect_equal(r3[[1]]$codes[["6"]], "bottom trawl")
+  expect_error(rr_point(d, labels = "Depth"), "named character")
+  expect_error(rr_point(d, codes = c(gear = "x")), "named list")
+  # a path's popup fields take the labels and the codes as the field lookup
+  p <- data.frame(lon = c(-22, -21.9, -21.8), lat = 64, t = 1:3, boat = c(1L, 1L, 1L))
+  attr(p$boat, "label") <- "Boat"
+  f <- layer(rr_path(p, group = boat, time = t, popup = boat, hover = NULL, codes = list(boat = c("1" = "Bjarni"))))$popup
+  expect_equal(f$title, "boat")
+  # the page shows the label, the unit and the code
+  page <- .rr_map_page("{}")
+  expect_match(page, "esc(c.label ?? c.name)", fixed = TRUE)
+  expect_match(page, "c.code ?", fixed = TRUE)
 })

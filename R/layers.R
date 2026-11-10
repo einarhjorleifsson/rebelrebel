@@ -188,15 +188,19 @@
     t <- .rr_column_type(con, ctx$src, f)
     Filter(Negate(is.null), list(field = f, label = f, format = if (t$kind == "continuous" && is.null(t$time)) "value"))
   })
+  # the rows, numbered and held for the session: a click asks the server for its row (/row/<id>/<n>), so the tiles
+  # carry the number and the title, not every column, and stay small however many columns the table has
+  rows_nm <- .rr_name(con, "rr_rows_")
+  DBI::dbExecute(con, sprintf("CREATE TEMP TABLE %s AS SELECT row_number() OVER () AS rr_row, * FROM (%s)", rows_nm, src))
   props <- unique(c(
-    if (length(cols)) paste0("rr_c", seq_along(cols)), pop, hov, lab,
+    if (length(cols)) paste0("rr_c", seq_along(cols)), if (length(pop)) "rr_row", title, hov, lab,
     intersect(.rr_or(s$state[["choose_fields"]], character()), ctx$cols),
     if (!is.null(t_s)) c("rr_t", ctx$by)
   ))
   if (!is.null(t_s)) {
     s$state$panel_fields[[id]] <- Filter(Negate(is.null), list(by = ctx$by, t = "rr_t"))
   }
-  tbl <- dplyr::tbl(con, dplyr::sql(src))
+  tbl <- dplyr::tbl(con, dplyr::sql(sprintf("SELECT * FROM %s", rows_nm)))
   tiles <- if (mark == "segment") {
     rr_tiles_table(tbl, geometry = "rr_geometry", properties = props)
   } else if (!is.null(ctx$geometry)) {
@@ -255,10 +259,14 @@
     legend = leg,
     variants = variants,
     popup = if (!is.null(title)) {
-      Filter(Negate(is.null), list(click = sid, title = title, fields = if (length(fields)) fields,
+      Filter(Negate(is.null), list(click = sid, title = title, row = if (length(pop)) TRUE,
                                    hover = if (length(hov)) TRUE))
     }
   )
+  meta <- .rr_popup_meta(pop, ctx$dict, a$labels, a$codes) # checked now, not on the first click
+  if (length(pop)) {
+    layer$row <- .rr_row_reader(con, rows_nm, pop, meta)
+  }
   s$state$layer_section[[id]] <- a$section
   .rr_hold(.rr_quick_map(s, layer, list(con = con, name = attr(tiles, "table"))))
 }
@@ -308,7 +316,14 @@
 #'   percentile), and how the colours spread between them, `"linear"`, `"log"` or `"equal"` (equal shares of the
 #'   values).
 #' @param legend Whether the layer has a legend.
-#' @param popup The columns a click shows, written bare; `TRUE`, every column; `FALSE`, no popup.
+#' @param popup The columns a click shows, written bare; `TRUE`, every column; `FALSE`, no popup. A click shows the
+#'   row as a table, read from the server (a bundle carries the rows): a column's name, its unit beside it and its
+#'   description behind it, where the data's dictionary or `labels` give them.
+#' @param labels The columns' names as the popup shows them, in place of the data's: `c(speed = "Speed (knots)")`. By
+#'   default a data frame's column attributes (`label`, `units`) or a parquet file's own dictionary (an entry of
+#'   data-dict.tidyverse.org's format in its metadata, as [rr_example()]'s files hold), else the column's name.
+#' @param codes The labels of a coded column's values, shown beside each code: a named list by column, each a named
+#'   vector (`c("6" = "bottom trawl")`) or a table of code and label; by default the dictionary's, where it has them.
 #' @param hover A column whose value is shown beside the pointer.
 #' @param choose For the map's first layer from data: the columns whose values the reader picks, as for [rr_map()].
 #' @param name,info The layer's name in the sidebar and the text behind its ⓘ.
@@ -332,14 +347,14 @@ rr_point <- function(
   map, data = NULL, lon = NULL, lat = NULL,
   colour = NULL, size = NULL, opacity = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
-  popup = TRUE, hover = NULL, choose = NULL,
+  popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
     lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
-    hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
+    labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
   ), rlang::enquos(...), "rr_point")
   .rr_scope()
@@ -352,14 +367,14 @@ rr_line <- function(
   map, data = NULL,
   colour = NULL, linewidth = NULL, opacity = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
-  popup = TRUE, hover = NULL, choose = NULL,
+  popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
     colour = rlang::enquo(colour), linewidth = rlang::enquo(linewidth), opacity = opacity,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
-    hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
+    labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
   ), rlang::enquos(...), "rr_line")
   .rr_scope()
@@ -372,7 +387,7 @@ rr_segment <- function(
   map, data = NULL, lon = NULL, lat = NULL, lon_end, lat_end,
   colour = NULL, linewidth = NULL, opacity = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
-  popup = TRUE, hover = NULL, choose = NULL,
+  popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
@@ -381,7 +396,7 @@ rr_segment <- function(
     lat_end = .rr_one_col(rlang::enquo(lat_end), "lat_end"),
     colour = rlang::enquo(colour), linewidth = rlang::enquo(linewidth), opacity = opacity,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
-    hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
+    labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
   ), rlang::enquos(...), "rr_segment")
   .rr_scope()
@@ -394,14 +409,15 @@ rr_polygon <- function(
   map, data = NULL,
   colour = NULL, fill = NULL, linewidth = NULL, opacity = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
-  popup = TRUE, hover = NULL, choose = NULL,
+  popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
     colour = rlang::enquo(colour), fill = rlang::enquo(fill), linewidth = rlang::enquo(linewidth),
     opacity = opacity, palette = palette, limits = limits, stretch = stretch, legend = legend,
-    popup = rlang::enquo(popup), hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name,
+    popup = rlang::enquo(popup), labels = labels, codes = codes, hover = rlang::enquo(hover),
+    choose = rlang::enquo(choose), name = name,
     info = info, section = section, visible = visible, minzoom = minzoom, maxzoom = maxzoom
   ), rlang::enquos(...), "rr_polygon")
   .rr_scope()
@@ -414,14 +430,15 @@ rr_text <- function(
   map, data = NULL, lon = NULL, lat = NULL,
   colour = NULL, size = NULL, opacity = NULL, label,
   palette = NULL, limits = NULL, stretch = NULL, legend = FALSE,
-  popup = FALSE, hover = NULL, choose = NULL,
+  popup = FALSE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
     lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity,
     label = rlang::enquo(label), palette = palette, limits = limits, stretch = stretch, legend = legend,
-    popup = rlang::enquo(popup), hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name,
+    popup = rlang::enquo(popup), labels = labels, codes = codes, hover = rlang::enquo(hover),
+    choose = rlang::enquo(choose), name = name,
     info = info, section = section, visible = visible, minzoom = minzoom, maxzoom = maxzoom
   ), rlang::enquos(...), "rr_text")
   .rr_scope()
@@ -465,7 +482,7 @@ rr_path <- function(
   map, data = NULL, lon = NULL, lat = NULL, group = NULL, time, max_gap_s = Inf,
   colour = NULL, linewidth = NULL, opacity = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
-  popup = TRUE, hover = NULL, choose = NULL,
+  popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
@@ -538,11 +555,23 @@ rr_path <- function(
   tiles <- rr_tiles_table(dplyr::tbl(con, dplyr::sql(lines_src)), properties = props)
   sid <- paste0(id, "-line")
   title <- if (length(hov)) hov else if (length(intersect(pop, keys))) intersect(pop, keys)[1] else if (length(pop)) "start"
+  pm <- .rr_popup_meta(unique(c(keys, cc)), ctx$dict, labels, codes)
+  lab_of <- function(f) {
+    m <- pm[[f]]
+    paste0(.rr_or(m$label, f), if (!is.null(m$unit)) sprintf(" (%s)", m$unit) else "")
+  }
+  coded <- function(f) {
+    m <- pm[[f]]
+    if (length(m$codes)) as.list(stats::setNames(paste(names(m$codes), "\u00b7", m$codes), names(m$codes)))
+  }
   fields <- if (length(pop)) {
     c(
-      lapply(setdiff(intersect(pop, keys), title), function(f) list(field = f, label = f)),
+      lapply(setdiff(intersect(pop, keys), title), function(f) {
+        Filter(Negate(is.null), list(field = f, label = lab_of(f), values = coded(f)))
+      }),
       if (length(cc) && cc %in% pop) list(Filter(Negate(is.null), list(
-        field = "rr_c1", label = cc, format = if (type$kind == "continuous" && is.null(type$time)) "value"
+        field = "rr_c1", label = lab_of(cc), values = coded(cc),
+        format = if (type$kind == "continuous" && is.null(type$time)) "value"
       ))),
       list(list(field = "start", label = "from"), list(field = "stop", label = "to"),
            list(field = "rows", label = "rows", format = "count"))
@@ -588,6 +617,11 @@ rr_path <- function(
 # stop), and in seconds on the time panel's clock (`t_names`, from `t_s`, .rr_time_s_sql()), and its geometry.
 .rr_runs_sql <- function(con, src, lon, lat, time, keys, values, names, count, t_names, gap, t_s) {
   q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
+  # a time's seconds, or a number as it is (a sequence, a distance along a transect), for the gaps and the text
+  one <- DBI::dbGetQuery(con, sprintf("SELECT %s AS t FROM (%s) LIMIT 0", q(time), src))$t
+  numeric <- is.numeric(one)
+  sec <- function(x) if (numeric) sprintf("CAST(%s AS DOUBLE)", x) else sprintf("epoch(%s)", x)
+  txt <- function(x) if (numeric) sprintf("CAST(%s AS VARCHAR)", x) else sprintf("strftime(%s, '%%Y-%%m-%%d %%H:%%M')", x)
   k <- length(values)
   part <- if (!length(keys)) "" else paste("PARTITION BY", paste(q(keys), collapse = ", "))
   sprintf(
@@ -595,13 +629,13 @@ rr_path <- function(
        SELECT %1$s %2$s AS lon, %3$s AS lat, %4$s AS t, %10$s AS rr_ts %8$s FROM (%7$s)
        WHERE %2$s IS NOT NULL AND %3$s IS NOT NULL AND %4$s IS NOT NULL),
      w AS (
-       SELECT *, CASE WHEN epoch(t) - epoch(lag(t) OVER o) > %6$s %9$s THEN 1 ELSE 0 END AS brk,
-              lead(lon) OVER o AS lon2, lead(lat) OVER o AS lat2, epoch(lead(t) OVER o) - epoch(t) AS dt_next
+       SELECT *, CASE WHEN %15$s - %16$s > %6$s %9$s THEN 1 ELSE 0 END AS brk,
+              lead(lon) OVER o AS lon2, lead(lat) OVER o AS lat2, %17$s - %15$s AS dt_next
        FROM s WINDOW o AS (%5$s ORDER BY t)),
      g AS (SELECT *, sum(brk) OVER (%5$s ORDER BY t ROWS UNBOUNDED PRECEDING) AS stretch FROM w),
      a AS (
-       SELECT %1$s %11$s count(*) AS %12$s, strftime(min(t), '%%Y-%%m-%%d %%H:%%M') AS start,
-              strftime(max(t), '%%Y-%%m-%%d %%H:%%M') AS stop, min(rr_ts) AS %13$s, max(rr_ts) AS %14$s,
+       SELECT %1$s %11$s count(*) AS %12$s, %18$s AS start,
+              %19$s AS stop, min(rr_ts) AS %13$s, max(rr_ts) AS %14$s,
               list(ST_Point(lon, lat) ORDER BY t) AS pts,
               last(CASE WHEN dt_next <= %6$s THEN lon2 END ORDER BY t) AS lon2,
               last(CASE WHEN dt_next <= %6$s THEN lat2 END ORDER BY t) AS lat2
@@ -615,6 +649,125 @@ rr_path <- function(
     paste(vapply(seq_len(k), function(i) sprintf(" OR v%1$d IS DISTINCT FROM lag(v%1$d) OVER o", i), ""), collapse = ""),
     .rr_or(t_s, "CAST(NULL AS DOUBLE)"),
     paste(vapply(seq_len(k), function(i) sprintf("any_value(v%d) AS %s, ", i, names[i]), ""), collapse = ""),
-    count, t_names[1], t_names[2]
+    count, t_names[1], t_names[2],
+    sec("t"), sec("lag(t) OVER o"), sec("lead(t) OVER o"), txt("min(t)"), txt("max(t)")
   )
+}
+
+# A layer's rows for a click: the columns `cols` of row `n` of the numbered table `nm` (or every row, `n = NULL`, for a
+# bundle), each with its kind for the page: a number, a whole number, a logical, a date, a time or a text
+.rr_row_reader <- function(con, nm, cols, meta = list()) {
+  q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
+  sel <- paste(vapply(cols, q, ""), collapse = ", ")
+  function(n = NULL) {
+    d <- DBI::dbGetQuery(con, sprintf(
+      "SELECT rr_row, %s FROM %s %s ORDER BY rr_row", sel, nm,
+      if (is.null(n)) "" else sprintf("WHERE rr_row = %d", as.integer(n))
+    ))
+    kinds <- vapply(cols, function(cc) {
+      v <- d[[cc]]
+      if (inherits(v, "POSIXct")) "time" else if (inherits(v, "Date")) "date" else if (is.logical(v)) "logical"
+      else if (is.integer(v)) "integer" else if (is.numeric(v)) "number" else "text"
+    }, "")
+    for (cc in cols) {
+      if (inherits(d[[cc]], "POSIXct")) d[[cc]] <- format(d[[cc]], "%Y-%m-%d %H:%M:%S", tz = "UTC")
+      else if (inherits(d[[cc]], "Date")) d[[cc]] <- format(d[[cc]])
+      else if (is.factor(d[[cc]])) d[[cc]] <- as.character(d[[cc]])
+      else if (is.list(d[[cc]])) d[[cc]] <- NA # a blob or a shape: not a value to read
+    }
+    list(cols = unname(Map(function(cc, k) {
+      m <- .rr_or(meta[[cc]], list())
+      Filter(Negate(is.null), list(name = cc, type = k, label = m$label, unit = m$unit, description = m$description,
+                                   codes = if (length(m$codes)) as.list(m$codes)))
+    }, cols, kinds)), rows = d)
+  }
+}
+
+# A row as the page reads it: its columns, each a name, a kind and a value (null where missing)
+.rr_row_json <- function(r) {
+  if (!nrow(r$rows)) {
+    return(NULL)
+  }
+  list(columns = lapply(seq_along(r$cols), function(i) {
+    cc <- r$cols[[i]]
+    v <- r$rows[[cc$name]][1]
+    code <- if (!is.null(cc$codes) && !is.na(v)) cc$codes[[as.character(v)]]
+    Filter(Negate(is.null), list(
+      name = cc$name, type = cc$type, value = if (is.na(v)) NULL else v, label = cc$label, unit = cc$unit,
+      description = cc$description, code = code
+    ))
+  }))
+}
+
+# What the data say of their columns, as a list by column of `label`, `unit`, `description` and `codes` (a named
+# character vector, code to label). From a data frame's column attributes (`label`, as haven and labelled set it;
+# `units`, a text):
+.rr_dict_attributes <- function(d) {
+  out <- list()
+  for (cc in names(d)) {
+    a <- attributes(d[[cc]])
+    lab <- if (is.character(a$label) && length(a$label) == 1) a$label
+    un <- if (is.character(a$units) && length(a$units) == 1) a$units
+    if (!is.null(lab) || !is.null(un)) out[[cc]] <- Filter(Negate(is.null), list(label = lab, unit = un))
+  }
+  out
+}
+
+# ... and from a parquet file's own dictionary: an entry of data-dict.tidyverse.org's format stored in the file's
+# metadata under a key ending `data_dict` (as rebelrebel's examples hold it), for each file the query reads
+.rr_dict_parquet <- function(con, src) {
+  paths <- regmatches(src, gregexpr("read_parquet\\('([^']+)'", src))[[1]]
+  paths <- unique(sub("^read_parquet\\('", "", sub("'$", "", paths)))
+  if (!length(paths) || !requireNamespace("yaml", quietly = TRUE)) {
+    return(list())
+  }
+  out <- list()
+  for (p in paths) {
+    kv <- tryCatch(DBI::dbGetQuery(con, sprintf(
+      "SELECT decode(value) AS v FROM parquet_kv_metadata(%s) WHERE decode(key) LIKE '%%data_dict' LIMIT 1",
+      DBI::dbQuoteString(con, p)
+    ))$v, error = function(e) character())
+    if (!length(kv)) next
+    entry <- tryCatch(yaml::yaml.load(enc2utf8(kv[1])), error = function(e) NULL)
+    for (c in entry$columns) {
+      if (is.null(c$name) || !is.null(out[[c$name]])) next
+      codes <- if (is.list(c$values) && !is.null(names(c$values))) unlist(c$values)
+      out[[c$name]] <- Filter(Negate(is.null), list(
+        label = c$label, unit = c$units, description = if (!is.null(c$description)) trimws(c$description),
+        codes = if (length(codes)) stats::setNames(as.character(codes), names(codes))
+      ))
+    }
+  }
+  out
+}
+
+# Two dictionaries as one, the first's entries winning, field by field
+.rr_dict_merge <- function(a, b) {
+  for (cc in names(b)) a[[cc]] <- utils::modifyList(b[[cc]], .rr_or(a[[cc]], list()))
+  a
+}
+
+# A layer's columns as its popup shows them: the call's `labels` (column = label) and `codes` (column = a named vector,
+# code to label, or a table of code and label) over the data's dictionary
+.rr_popup_meta <- function(cols, dict, labels = NULL, codes = NULL) {
+  if (!is.null(labels) && (!is.character(labels) || is.null(names(labels)))) {
+    stop("`labels` is a named character vector, a column's name to its label: c(speed = \"Speed (knots)\").", call. = FALSE)
+  }
+  if (!is.null(codes) && (!is.list(codes) || is.null(names(codes)))) {
+    stop("`codes` is a named list, a column's name to its codes: a named vector (code = label) or a table of code and label.", call. = FALSE)
+  }
+  lapply(stats::setNames(cols, cols), function(cc) {
+    m <- .rr_or(dict[[cc]], list())
+    if (cc %in% names(labels)) {
+      m$label <- labels[[cc]]
+      m$unit <- NULL # the call's label says it all
+    }
+    cd <- if (cc %in% names(codes)) codes[[cc]]
+    if (is.data.frame(cd)) {
+      if (ncol(cd) < 2) stop(sprintf("`codes$%s`: a table of two columns, the code and its label.", cc), call. = FALSE)
+      cd <- stats::setNames(as.character(cd[[2]]), as.character(cd[[1]]))
+    }
+    if (!is.null(cd)) m$codes <- stats::setNames(as.character(cd), names(cd))
+    m
+  })
 }

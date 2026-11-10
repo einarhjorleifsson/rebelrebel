@@ -306,6 +306,22 @@ rr_stop <- function(port = NULL) {
         list(`Cache-Control` = "no-store")
       ))
     }
+    # a feature's row, read on a click (a layer function's popup), its columns those the call named
+    rw <- regmatches(path, regexec("^/row/([a-z][a-z0-9_]*)/([0-9]+)$", path))[[1]]
+    if (length(rw) == 3) {
+      reader <- layers[[rw[2]]]$row
+      if (!is.function(reader)) {
+        return(reply(404L, "no rows for this layer"))
+      }
+      v <- tryCatch(.rr_row_json(reader(as.integer(rw[3]))), error = function(e) e)
+      if (inherits(v, "error")) {
+        return(reply(500L, sub("\n.*", "", conditionMessage(v))))
+      }
+      if (is.null(v)) {
+        return(reply(404L, "no such row"))
+      }
+      return(reply(200L, json(v), "application/json; charset=utf-8"))
+    }
     f <- regmatches(path, regexec("^/fit/([a-z][a-z0-9_]*)$", path))[[1]]
     if (length(f) == 2) {
       fit <- layers[[f[2]]]$fit

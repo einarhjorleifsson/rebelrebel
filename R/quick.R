@@ -218,8 +218,9 @@
     }
   }
   groups <- dplyr::group_vars(rows)
-  # an ordered factor's order, which DuckDB's ENUM does not keep
+  # an ordered factor's order, which DuckDB's ENUM does not keep, and a column's label and units, its attributes
   ordered <- if (is.data.frame(rows)) names(Filter(is.ordered, rows)) else character()
+  dict <- if (is.data.frame(rows)) .rr_dict_attributes(rows) else list()
   con <- .rr_con_for(rows)
   x <- dplyr::ungroup(.rr_as_lazy(rows, con))
   if (wkt) {
@@ -263,6 +264,7 @@
     con = con,
     groups = groups,
     ordered = ordered,
+    dict = .rr_dict_merge(dict, .rr_dict_parquet(con, .rr_sql(x))),
     src = .rr_sql(x),
     cols = cols,
     lon = if (is.null(geometry)) lon,
