@@ -199,8 +199,30 @@ test_that("the config keeps one-element arrays as arrays", {
   expect_length(m$config$palettes, 18) # twelve for the grid, seven looks for a depth, deep in both
   expect_equal(
     vapply(m$config$basemaps, `[[`, "", "id"),
-    c("light", "voyager", "dark", "ocean", "satellite", "none")
+    c("emodnet", "emodnet_dark", "emodnet_light", "ocean", "none")
   )
+})
+
+test_that("the base maps are those that show the sea floor, each a picture with names over it", {
+  b <- rr_basemaps()
+  names(b) <- vapply(b, `[[`, "", "id")
+  # a map opens on EMODnet's sea floor; none is the one that is not a map
+  expect_equal(names(b)[1], "emodnet")
+  for (id in setdiff(names(b), "none")) {
+    expect_match(b[[id]]$tiles, "^https://.*\\{z\\}.*\\{x\\}|^https://.*\\{z\\}/\\{y\\}/\\{x\\}")
+    expect_match(b[[id]]$labels, "^https://basemaps\\.cartocdn\\.com/gl/.*/style\\.json$")
+    expect_true(nzchar(b[[id]]$attribution))
+    expect_null(b[[id]]$style)
+  }
+  expect_match(b$emodnet$attribution, "EMODnet", fixed = TRUE)
+  expect_match(b$emodnet_dark$labels, "dark-matter", fixed = TRUE)
+  expect_lt(b$emodnet_dark$paint[["raster-brightness-max"]], 1)
+  expect_null(b$none$tiles)
+  # the page opens on a picture: its names' style first, then the picture put under the names
+  page <- .rr_map_page("{}")
+  expect_match(page, "style: BASEMAPS[0].style ?? BASEMAPS[0].labels ?? baseStyle(BASEMAPS[0])", fixed = TRUE)
+  expect_match(page, "if (!BASEMAPS[0].style) setBase(BASEMAPS[0].id);", fixed = TRUE)
+  expect_match(page, "next = compose(b, next);", fixed = TRUE)
 })
 
 test_that("the server's routes: the page, its config, meta, tiles and data", {
@@ -552,7 +574,7 @@ test_that("pings on a map, coloured by a column", {
   m <- .rr_pings(d, time = "time_stamp")
   expect_s3_class(m, "rr_map")
   expect_equal(vapply(m$config$layers, `[[`, "", "id"), "pings")
-  expect_equal(m$config$basemaps[[1]]$id, "dark")
+  expect_equal(m$config$basemaps[[1]]$id, "emodnet")
   # a numeric column: a continuous palette, grey where it is missing; five steps in the legend
   expect_equal(
     m$config$layers[[1]]$style[[1]]$paint[["circle-color"]][[1]],

@@ -1023,11 +1023,13 @@ function fitToView() {
 }
 
 // The map --------------------------------------------------------------------------------------------------------------
+// a picture base map opens on its names' style, put under its names by setBase() before the map has loaded
 const map = new maplibregl.Map({
   container: "map",
-  style: BASEMAPS[0].style,
+  style: BASEMAPS[0].style ?? BASEMAPS[0].labels ?? baseStyle(BASEMAPS[0]),
   center: CONFIG.view.center, zoom: CONFIG.view.zoom, hash: true
 });
+if (!BASEMAPS[0].style) setBase(BASEMAPS[0].id);
 // a page laid out after the map was made (a tab opened in the background) left the canvas at 400 x 300
 new ResizeObserver(() => map.resize()).observe($("map"));
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -1061,18 +1063,33 @@ function applyLang(l) {
 for (const b of document.querySelectorAll("[data-lang]")) b.addEventListener("click", () => applyLang(b.dataset.lang));
 applyLang(new URLSearchParams(location.search).get("lang"));
 
-// A raster base or none has no glyphs of its own: the layers' labels keep the previous style's
+// A raster base or none has no glyphs of its own: the layers' labels keep the previous style's. A picture with
+// `labels` opens on that style, and compose() puts the picture under its names
 function baseStyle(b) {
   if (b.style) return b.style;
-  const layers = [{ id: "base-bg", type: "background", paint: { "background-color": "#eef0f2" } }];
+  if (b.tiles && b.labels) return b.labels;
+  const layers = [{ id: "base-bg", type: "background", paint: { "background-color": b.background ?? "#eef0f2" } }];
   if (!b.tiles) return { version: 8, sources: {}, layers };
-  return { version: 8, layers: [...layers, { id: "base", type: "raster", source: "base" }],
+  return { version: 8, layers: [...layers, { id: "base", type: "raster", source: "base", ...(b.paint ? { paint: b.paint } : {}) }],
            sources: { base: { type: "raster", tiles: [b.tiles], tileSize: 256, maxzoom: b.maxzoom,
                               attribution: b.attribution ?? "" } } };
+}
+// A picture under a vector style's names: the style's sources, fonts and sprite kept, of its layers only the names
+// (`label_layers`, by default places and seas), the picture drawn with its own paint (a darkened sea floor)
+function compose(b, next) {
+  if (b.style || !b.tiles || !b.labels) return next;
+  const keep = new RegExp(b.label_layers ?? "^(place_|watername_|waterway_label)");
+  const names = next.layers.filter(l => l.type === "symbol" && keep.test(l.id));
+  return { ...next,
+           sources: { ...next.sources, base: { type: "raster", tiles: [b.tiles], tileSize: 256, maxzoom: b.maxzoom,
+                                               attribution: b.attribution ?? "" } },
+           layers: [{ id: "base-bg", type: "background", paint: { "background-color": b.background ?? "#eef0f2" } },
+                    { id: "base", type: "raster", source: "base", ...(b.paint ? { paint: b.paint } : {}) }, ...names] };
 }
 function setBase(id) {
   const b = BASEMAPS.find(x => x.id === id) ?? BASEMAPS[0];
   map.setStyle(baseStyle(b), { transformStyle: (prev, next) => {
+    next = compose(b, next);
     if (!prev) return next;
     const own = prev.layers.filter(l => SOURCES.has(l.source));
     const sources = Object.fromEntries(Object.entries(prev.sources).filter(([k]) => SOURCES.has(k)));

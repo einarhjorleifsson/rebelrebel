@@ -12,7 +12,11 @@ rr_basemaps()
 \value{
 A list, each element with \code{id} and \code{label}: a palette with \code{source}, \code{colors} and \code{use} (\code{"grid"},
 \code{"depth"} or both); a base map with \code{style} (a MapLibre style's address) or \code{tiles} (a raster address) with
-\code{maxzoom} and \code{attribution}, or neither (none). A palette of your own, given to \code{\link[=rr_map]{rr_map()}}'s \code{palettes}, needs
+\code{maxzoom} and \code{attribution}, and optionally \code{paint} (MapLibre's raster paint, such as \code{raster-brightness-max}),
+\code{background} (the colour beyond the picture's tiles), \code{labels} (a MapLibre style whose names are drawn over the
+picture, with its fonts) and \code{label_layers} (a regular
+expression for which of its layers: by default its symbol layers whose id starts \code{place_}, \code{watername_} or
+\code{waterway_label}), or neither (none). A palette of your own, given to \code{\link[=rr_map]{rr_map()}}'s \code{palettes}, needs
 \code{id}, \code{label} and \code{colors}; with no \code{use} it is offered to the grid.
 }
 \description{
@@ -35,8 +39,10 @@ of Icelandic waters (2026-11-09): quiet, seabed, chart and grey designed in OKLC
 tidyterra to 17 stops at even steps in OKLab, their whitest stops dropped.
 }
 
-\code{rr_basemaps()}: Carto's Positron, Voyager and Dark Matter (vector), Esri's ocean and satellite tiles
-(raster), and none.
+\code{rr_basemaps()}: base maps that show the sea floor, and none: EMODnet's sea floor (its 2020 base layer, the first
+and the one a map opens on), the same darkened, EMODnet's lighter atlas (v12), and Esri's ocean, which reaches beyond
+Europe's seas. Each is a picture with the place and sea names of a Carto style over it, Positron's on the light ones
+and Dark Matter's on the dark. A base map that shows a flat sea is left out: the depth is the subject.
 }
 \examples{
 vapply(rr_palettes(), `[[`, "", "id")

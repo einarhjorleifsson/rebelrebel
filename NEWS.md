@@ -1,3 +1,12 @@
+# rebelrebel 2026.11.10.1
+
+* The base maps are those that show the sea floor: EMODnet's sea floor (its 2020 base
+  layer), the first and the one a map opens on; the same darkened (`emodnet_dark`); EMODnet's lighter atlas (v12); and
+  Esri's ocean, which reaches beyond Europe's seas; and none. Carto's Positron, Voyager and Dark Matter (a flat sea)
+  and Esri's satellite tiles are no longer offered. Each picture has a Carto style's place and sea names drawn over it
+  (Positron's, or Dark Matter's on the dark one), which also give the layers' own labels their fonts: a base map's
+  `labels`, `label_layers`, `paint` and `background` in `rr_basemaps()`. The page opens on a picture base map.
+
 # rebelrebel 2026.11.10
 
 * The package starts as ramb's map viewer, moved here unchanged but for its names:

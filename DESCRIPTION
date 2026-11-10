@@ -1,7 +1,7 @@
 Package: rebelrebel
 Type: Package
 Title: Fast Maps on 'MapLibre' for Marine Data
-Version: 2026.11.10
+Version: 2026.11.10.1
 Authors@R: c(
   person("Einar", "Hjörleifsson", role = c("aut", "cre"), email = "einar.hjorleifsson@gmail.com")
   )

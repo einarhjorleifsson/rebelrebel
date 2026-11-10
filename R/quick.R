@@ -29,7 +29,7 @@
 #' the previous and next. A choice shows those groups' pings and lines on every layer that has the column, fits the
 #' view to them, and goes into the address. The groups cut the track too, so each group's line is its own.
 #'
-#' The map opens on a dark base map. Each layer copies its pings into a temporary DuckDB table, as
+#' The map opens on the first base map, EMODnet's sea floor. Each layer copies its pings into a temporary DuckDB table, as
 #' [rr_tiles_table()] does.
 #'
 #' @param x Pings: a data frame or lazy DuckDB table with `lon` and `lat` (WGS 84), or an sf object of points; or a
@@ -873,7 +873,6 @@
   lat1 <- max(vapply(state$boxes, `[[`, 1, "lat1"))
   span <- max(lon1 - lon0, 2 * (lat1 - lat0)) # a degree of latitude draws taller
   bases <- rr_basemaps()
-  ids <- vapply(bases, `[[`, "", "id")
   m <- rr_map(
     rr_section("track", "Track", state$layers),
     title = state$title,
@@ -892,7 +891,7 @@
       })
       cfg
     },
-    basemaps = bases[c(which(ids == "dark"), which(ids != "dark"))]
+    basemaps = bases
   )
   # the time panel (rr_time()): its config for the page, its series for the server and its tables
   if (!is.null(state$time)) {

@@ -19,12 +19,18 @@
 #'   bathymetry map of Icelandic waters (2026-11-09): quiet, seabed, chart and grey designed in OKLCh, drained and haxby resampled from
 #'   tidyterra to 17 stops at even steps in OKLab, their whitest stops dropped.
 #'
-#' `rr_basemaps()`: Carto's Positron, Voyager and Dark Matter (vector), Esri's ocean and satellite tiles
-#' (raster), and none.
+#' `rr_basemaps()`: base maps that show the sea floor, and none: EMODnet's sea floor (its 2020 base layer, the first
+#' and the one a map opens on), the same darkened, EMODnet's lighter atlas (v12), and Esri's ocean, which reaches beyond
+#' Europe's seas. Each is a picture with the place and sea names of a Carto style over it, Positron's on the light ones
+#' and Dark Matter's on the dark. A base map that shows a flat sea is left out: the depth is the subject.
 #'
 #' @return A list, each element with `id` and `label`: a palette with `source`, `colors` and `use` (`"grid"`,
 #'   `"depth"` or both); a base map with `style` (a MapLibre style's address) or `tiles` (a raster address) with
-#'   `maxzoom` and `attribution`, or neither (none). A palette of your own, given to [rr_map()]'s `palettes`, needs
+#'   `maxzoom` and `attribution`, and optionally `paint` (MapLibre's raster paint, such as `raster-brightness-max`),
+#'   `background` (the colour beyond the picture's tiles), `labels` (a MapLibre style whose names are drawn over the
+#'   picture, with its fonts) and `label_layers` (a regular
+#'   expression for which of its layers: by default its symbol layers whose id starts `place_`, `watername_` or
+#'   `waterway_label`), or neither (none). A palette of your own, given to [rr_map()]'s `palettes`, needs
 #'   `id`, `label` and `colors`; with no `use` it is offered to the grid.
 #' @export
 #' @examples
@@ -275,37 +281,22 @@ rr_palettes <- function() {
 #' @rdname rr_palettes
 #' @export
 rr_basemaps <- function() {
+  emodnet <- "Sea floor \u00a9 EMODnet Bathymetry Consortium (CC BY 4.0)"
   esri <- "Tiles \u00a9 Esri and its sources"
+  light <- "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+  dark <- "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+  floor <- "https://tiles.emodnet-bathymetry.eu/2020/baselayer/web_mercator/{z}/{x}/{y}.png"
   list(
-    list(
-      id = "light",
-      label = "Light (Carto Positron)",
-      style = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
-    ),
-    list(
-      id = "voyager",
-      label = "Colour (Carto Voyager)",
-      style = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
-    ),
-    list(
-      id = "dark",
-      label = "Dark (Carto Dark Matter)",
-      style = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-    ),
-    list(
-      id = "ocean",
-      label = "Ocean (Esri)",
-      maxzoom = 13,
-      attribution = esri,
-      tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}"
-    ),
-    list(
-      id = "satellite",
-      label = "Satellite (Esri)",
-      maxzoom = 19,
-      attribution = esri,
-      tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-    ),
+    # the 2020 base layer's tiles stop at zoom 10 (blank beyond), drawn larger past it
+    list(id = "emodnet", label = "Sea floor (EMODnet)", maxzoom = 10, attribution = emodnet, labels = light,
+         tiles = floor),
+    list(id = "emodnet_dark", label = "Sea floor, dark (EMODnet)", maxzoom = 10, attribution = emodnet, labels = dark,
+         tiles = floor, background = "#15191d",
+         paint = list("raster-brightness-max" = 0.42, "raster-saturation" = -0.35, "raster-contrast" = 0.15)),
+    list(id = "emodnet_light", label = "Sea floor, light (EMODnet)", maxzoom = 12, attribution = emodnet,
+         labels = light, tiles = "https://tiles.emodnet-bathymetry.eu/v12/mean_atlas_land/web_mercator/{z}/{x}/{y}.png"),
+    list(id = "ocean", label = "Ocean (Esri)", maxzoom = 13, attribution = esri, labels = light,
+         tiles = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}"),
     list(id = "none", label = "None")
   )
 }
