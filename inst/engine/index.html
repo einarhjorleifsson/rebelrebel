@@ -38,6 +38,7 @@
   .row[hidden] { display: none; }
   .choose { padding: 4px 12px 6px; border-bottom: 1px solid var(--line); }
   .choose .row button { padding: 1px 7px; }
+  .choose.own { padding: 0; border-bottom: 0; }
   .choose .chips { display: flex; flex-wrap: wrap; gap: 1px 10px; margin: -2px 0 4px 80px; }
   .choose .chips label { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
   .row label { width: 74px; color: var(--muted); }
@@ -841,6 +842,33 @@ function readColour(l, q) {
   if (l.colour.fit && (q.get(k("auto")) === "0" || ((q.get(k("lo")) || q.get(k("hi"))) && q.get(k("auto")) !== "1")))
     $(`${l.id}-cauto`).checked = false;
 }
+// The choices: the map's lists above the groups, over every layer that has the field (`CONFIG.choose`); a layer's own
+// under its name, over it alone (`l.choose`). Each set's lists are linked by the combinations its rows hold. A field
+// of few values (`multi`) is chips that tick on and off, one of many a list to show one at a time; ‹ › step through
+// either. In the address a map's choice is under the field's name, a layer's under its id and the field's
+const SETS = [];
+if (CONFIG.choose?.fields?.length) SETS.push({ fields: CONFIG.choose.fields, extents: CONFIG.choose.extents ?? [], layer: null });
+for (const l of LAYERS) if (l.choose?.fields?.length) SETS.push({ fields: l.choose.fields, extents: l.choose.extents ?? [], layer: l.id });
+SETS.forEach((S, k) => {
+  S.k = k;
+  S.key = S.layer === null ? "" : S.layer + "_";
+  S.combos = S.extents.map(e => ({ vals: e.key.split("\u001f"), n: e.n ?? 0 }));
+});
+const chId = (S, i) => `ch-${S.k}-${i}`;
+function chooseHtml(S) {
+  return S.fields.map((f, i) => {
+    const head = `<div class="row"><label for="${chId(S, i)}" data-t="${esc(f.label ?? f.field)}"></label>` +
+      `<button data-step="-1" data-set="${S.k}" data-ch="${i}" data-tt="chooseBack">‹</button>`;
+    const next = `<button data-step="1" data-set="${S.k}" data-ch="${i}" data-tt="chooseNext">›</button>`;
+    if (f.multi) {
+      return head + `<button data-all="${i}" data-set="${S.k}" data-t="chooseAll" data-tt="chooseAllTip"></button>` + next + "</div>" +
+        `<div class="chips" id="${chId(S, i)}">` + f.options.map(o => `<label><input type="checkbox" value="${esc(o.value)}" checked>` +
+        `${esc(o.label ?? o.value)}</label>`).join("") + "</div>";
+    }
+    return head + `<select id="${chId(S, i)}"><option value="" data-t="chooseAll"></option>` +
+      f.options.map(o => `<option value="${esc(o.value)}">${esc(o.label ?? o.value)}</option>`).join("") + "</select>" + next + "</div>";
+  }).join("");
+}
 function layerRow(l) {
   const row = document.createElement("div");
   row.className = "layer" + (l.visible ? "" : " off");
@@ -875,6 +903,8 @@ function layerRow(l) {
                          ` data-t="${esc(o.label)}"></option>`).join("") + "</select>"
     : `<label class="auto"><input type="checkbox" id="${l.id}-s-${s.id}"${s.default ? " checked" : ""}><span data-t="${esc(s.label)}"></span></label>`) +
     "</div></div>");
+  const own = SETS.find(S => S.layer === l.id);
+  if (own) row.insertAdjacentHTML("beforeend", `<div class="when-on choose own">${chooseHtml(own)}</div>`);
   if (l.legend || l.variants?.options.some(o => o.legend))
     row.insertAdjacentHTML("beforeend", `<div class="when-on swatches" id="${l.id}-legend">${legendHtml(l.legend ?? [])}</div>`);
   return row;
@@ -886,35 +916,23 @@ for (const g of CONFIG.groups) {
   for (const id of g.layers) d.querySelector(".body").append(layerRow(LAYERS.find(l => l.id === id)));
   $("groups").insertBefore(d, $("g-notes"));
 }
-// The map's choices (a field's values to show, from the data's groups), above the groups: chips that tick on and off
-// for a field of few values (`multi`), a list to show one at a time for one of many; ‹ › step through either
-const CHOOSE = CONFIG.choose?.fields ?? [];
-if (CHOOSE.length) {
+// the map's own lists, above the groups
+const MAPSET = SETS.find(S => S.layer === null);
+if (MAPSET) {
   const box = document.createElement("div");
   box.className = "choose";
-  box.innerHTML = CHOOSE.map((f, i) => {
-    const head = `<div class="row"><label for="ch-${i}" data-t="${esc(f.label ?? f.field)}"></label>` +
-      `<button data-step="-1" data-ch="${i}" data-tt="chooseBack">‹</button>`;
-    const next = `<button data-step="1" data-ch="${i}" data-tt="chooseNext">›</button>`;
-    if (f.multi) {
-      return head + `<button data-all="${i}" data-t="chooseAll" data-tt="chooseAllTip"></button>` + next + "</div>" +
-        `<div class="chips" id="ch-${i}">` + f.options.map(o => `<label><input type="checkbox" value="${esc(o.value)}" checked>` +
-        `${esc(o.label ?? o.value)}</label>`).join("") + "</div>";
-    }
-    return head + `<select id="ch-${i}"><option value="" data-t="chooseAll"></option>` +
-      f.options.map(o => `<option value="${esc(o.value)}">${esc(o.label ?? o.value)}</option>`).join("") + "</select>" + next + "</div>";
-  }).join("");
+  box.innerHTML = chooseHtml(MAPSET);
   $("groups").prepend(box);
 }
-// the values chosen of a field, null where every value is shown
-function chosen(i) {
-  const f = CHOOSE[i], el = $("ch-" + i);
+// the values chosen of a set's field, null where every value is shown
+function chosen(S, i) {
+  const f = S.fields[i], el = $(chId(S, i));
   if (!f.multi) return el.value === "" ? null : [el.value];
   const on = [...el.querySelectorAll("input")].filter(x => x.checked).map(x => x.value);
   return on.length === f.options.length ? null : on;
 }
-function setChosen(i, vals) {
-  const f = CHOOSE[i], el = $("ch-" + i);
+function setChosen(S, i, vals) {
+  const f = S.fields[i], el = $(chId(S, i));
   if (!f.multi) { el.value = vals?.[0] ?? ""; return; }
   for (const x of el.querySelectorAll("input")) x.checked = vals === null || vals.includes(x.value);
 }
@@ -1165,11 +1183,13 @@ Promise.all([BUNDLE ? BUNDLE.meta : fetch("/meta").then(r => r.json()), styleLoa
   for (const l of OTHER) if (l.shade) readShade(l, q);
   for (const l of OTHER) if (l.colour) readColour(l, q);
   for (const l of OTHER) if (l.contours?.fit && ["0", "1"].includes(q.get(l.id + "_auto"))) $(`${l.id}-kauto`).checked = q.get(l.id + "_auto") === "1";
-  CHOOSE.forEach((f, i) => {
-    const vals = (q.get(f.field) ?? "").split(",").filter(v => f.options.some(o => o.value === v));
-    if (vals.length) setChosen(i, f.multi ? vals : vals.slice(0, 1));
-  });
-  linkChoices(-1);
+  for (const S of SETS) {
+    S.fields.forEach((f, i) => {
+      const vals = (q.get(S.key + f.field) ?? "").split(",").filter(v => f.options.some(o => o.value === v));
+      if (vals.length) setChosen(S, i, f.multi ? vals : vals.slice(0, 1));
+    });
+    linkChoices(S, -1);
+  }
   FONT = map.getStyle().layers.find(l => l.type === "symbol" && l.layout?.["text-font"])?.layout["text-font"] ?? FONT;
   if (G) {
     const firstSymbol = map.getStyle().layers.find(l => l.type === "symbol")?.id;
@@ -1232,7 +1252,7 @@ function addressNow() {
     put(`${l.id}_cut`, String(v.cut), String(d.cut)); put(`${l.id}_cop`, String(v.op), String(d.op));
   }
   for (const l of OTHER) if (l.contours?.fit) put(`${l.id}_auto`, contourFollowing(l) ? "1" : "0", l.contours.auto === false ? "0" : "1");
-  CHOOSE.forEach((f, i) => put(f.field, chosen(i)?.join(",") ?? "", ""));
+  for (const S of SETS) S.fields.forEach((f, i) => put(S.key + f.field, chosen(S, i)?.join(",") ?? "", ""));
   if (TP && TS) {
     const v = tVes(), t = TS.t;
     put("tv", v.value, TP.vessels[0].value);
@@ -1383,9 +1403,10 @@ for (const l of OTHER) if (l.colour?.fit) {
 // A layer's styles filtered to the values chosen, on top of each style's own filter; a layer without the field is
 // left as it is. Nothing is fetched again: the tiles carry the fields
 function choiceFilter(l, st) {
-  const conds = CHOOSE.flatMap((f, i) => {
-    const vals = chosen(i);
-    if (vals === null || !(f.layers ?? []).includes(l.id)) return [];
+  const conds = SETS.flatMap(S => S.fields.map((f, i) => [S, f, i])).flatMap(([S, f, i]) => {
+    if (S.layer === null ? !(f.layers ?? []).includes(l.id) : S.layer !== l.id) return [];
+    const vals = chosen(S, i);
+    if (vals === null) return [];
     const os = f.options.filter(o => vals.includes(o.value));
     const cond = ["in", ["get", f.field], ["literal", os.filter(o => o.match !== null).map(o => o.match)]];
     return [os.some(o => o.match === null) ? ["any", ["!", ["has", f.field]], cond] : cond];
@@ -1409,44 +1430,43 @@ function applyChoice(l) {
 }
 // the view fitted to the choice: the combination's extent where every field has one value chosen, else the extent of
 // the values chosen of the field just changed
-function zoomToChoice(i) {
-  const sets = CHOOSE.map((f, j) => chosen(j));
+function zoomToChoice(S, i) {
+  const sets = S.fields.map((f, j) => chosen(S, j));
   if (sets.every(v => v === null)) return;
-  let box = CHOOSE.length > 1 && sets.every(v => v !== null && v.length === 1)
-    ? CONFIG.choose.extents?.find(e => e.key === sets.map(v => v[0]).join("\u001f"))?.bbox : null;
+  let box = S.fields.length > 1 && sets.every(v => v !== null && v.length === 1)
+    ? S.extents.find(e => e.key === sets.map(v => v[0]).join("\u001f"))?.bbox : null;
   if (!box) {
     const j = sets[i] !== null ? i : sets.findIndex(v => v !== null);
-    const bs = CHOOSE[j].options.filter(o => sets[j].includes(o.value) && o.bbox).map(o => o.bbox);
+    const bs = S.fields[j].options.filter(o => sets[j].includes(o.value) && o.bbox).map(o => o.bbox);
     if (bs.length) box = [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])),
                           Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
   }
   if (box) map.fitBounds([[box[0], box[1]], [box[2], box[3]]], { padding: 40, maxZoom: 14 });
 }
-// The lists linked: each offers only the values the other lists' choices leave, from the combinations the data hold
-// (`extents`), its counts the rows left; a choice the others no longer leave goes back to all. So a list of trips
-// after a list of vessels holds the chosen vessel's trips, and a gear chosen leaves the years it fished.
-const COMBOS = (CONFIG.choose?.extents ?? []).map(e => ({ vals: e.key.split("\u001f"), n: e.n ?? 0 }));
-function offered(i, sets) {
-  if (CHOOSE.length < 2 || !COMBOS.length) return null;
+// A set's lists linked: each offers only the values the other lists' choices leave, from the combinations the data
+// hold (`extents`), its counts the rows left. So a list of trips after a list of vessels holds the chosen vessel's
+// trips, and a gear chosen leaves the years it fished
+function offered(S, i, sets) {
+  if (S.fields.length < 2 || !S.combos.length) return null;
   const count = new Map();
-  for (const c of COMBOS) {
+  for (const c of S.combos) {
     if (sets.every((s, j) => j === i || s === null || s.includes(c.vals[j]))) count.set(c.vals[i], (count.get(c.vals[i]) ?? 0) + c.n);
   }
   return count;
 }
-function linkChoices(changed) {
-  if (CHOOSE.length < 2 || !COMBOS.length) return;
+function linkChoices(S, changed) {
+  if (S.fields.length < 2 || !S.combos.length) return;
   // a choice the others no longer leave goes back to all, the last list first, so that a trip gives way to its vessel;
   // a list put back to all only widens the others, so one pass leaves the choices that remain together in the data
-  for (let i = CHOOSE.length - 1; i >= 0; i--) {
-    const s = chosen(i);
+  for (let i = S.fields.length - 1; i >= 0; i--) {
+    const s = chosen(S, i);
     if (i === changed || s === null) continue;
-    const count = offered(i, CHOOSE.map((f, j) => chosen(j)));
-    if (!s.some(v => count.has(v))) setChosen(i, null);
+    const count = offered(S, i, S.fields.map((f, j) => chosen(S, j)));
+    if (!s.some(v => count.has(v))) setChosen(S, i, null);
   }
-  const sets = CHOOSE.map((f, j) => chosen(j));
-  CHOOSE.forEach((f, i) => {
-    const count = offered(i, sets), el = $("ch-" + i);
+  const sets = S.fields.map((f, j) => chosen(S, j));
+  S.fields.forEach((f, i) => {
+    const count = offered(S, i, sets), el = $(chId(S, i));
     const text = o => `${o.text} (${count.get(o.value).toLocaleString(loc())})`;
     for (const o of f.options) {
       const on = count.has(o.value);
@@ -1464,28 +1484,29 @@ function linkChoices(changed) {
     }
   });
 }
-function onChoice(i) {
+function onChoice(S, i) {
   popup?.remove();
-  linkChoices(i);
-  for (const l of OTHER) applyChoice(l);
-  zoomToChoice(i);
+  linkChoices(S, i);
+  for (const l of OTHER) if (S.layer === null || S.layer === l.id) applyChoice(l);
+  zoomToChoice(S, i);
 }
-CHOOSE.forEach((f, i) => $("ch-" + i).addEventListener("change", () => onChoice(i)));
+for (const S of SETS) S.fields.forEach((f, i) => $(chId(S, i)).addEventListener("change", () => onChoice(S, i)));
 // ‹ and › show one value: the next or previous of the one shown, else the first or the last; all shows every value
 for (const b of document.querySelectorAll("[data-step]")) b.addEventListener("click", () => {
-  const i = +b.dataset.ch, f = CHOOSE[i], cur = chosen(i);
+  const S = SETS[+b.dataset.set], i = +b.dataset.ch, f = S.fields[i], cur = chosen(S, i);
   // the values the other lists leave, in order
-  const count = offered(i, CHOOSE.map((g, j) => chosen(j))), opts = count ? f.options.filter(o => count.has(o.value)) : f.options;
+  const count = offered(S, i, S.fields.map((g, j) => chosen(S, j))), opts = count ? f.options.filter(o => count.has(o.value)) : f.options;
   const n = opts.length;
   if (n < 1) return;
   const at = cur !== null && cur.length === 1 ? opts.findIndex(o => o.value === cur[0]) : -1;
-  setChosen(i, [opts[at < 0 ? (+b.dataset.step > 0 ? 0 : n - 1) : (at + +b.dataset.step + n) % n].value]);
-  onChoice(i);
+  setChosen(S, i, [opts[at < 0 ? (+b.dataset.step > 0 ? 0 : n - 1) : (at + +b.dataset.step + n) % n].value]);
+  onChoice(S, i);
   writeAddress();
 });
 for (const b of document.querySelectorAll("[data-all]")) b.addEventListener("click", () => {
-  setChosen(+b.dataset.all, null);
-  onChoice(+b.dataset.all);
+  const S = SETS[+b.dataset.set];
+  setChosen(S, +b.dataset.all, null);
+  onChoice(S, +b.dataset.all);
   writeAddress();
 });
 

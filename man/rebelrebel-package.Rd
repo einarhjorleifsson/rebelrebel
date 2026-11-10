@@ -11,6 +11,7 @@ Interactive maps of parquet files and 'DuckDB' tables, drawn in the browser by '
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://einarhjorleifsson.github.io/rebelrebel/}
   \item \url{https://github.com/einarhjorleifsson/rebelrebel}
   \item Report bugs at \url{https://github.com/einarhjorleifsson/rebelrebel/issues}
 }

@@ -108,9 +108,10 @@
   }
   s <- .rr_quick(
     map, if (!is.null(data)) .rr_data(data), a$lon, a$lat, NULL, rlang::quo(NULL), "Map", 8790L,
-    a$choose, groups = FALSE
+    groups = FALSE
   )
   ctx <- s$ctx_layer
+  own <- .rr_own_choose(a$choose, ctx)
   con <- ctx$con
   q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
   nm <- .rr_layer_names(s$state, a$name, mk$kind)
@@ -194,7 +195,7 @@
   DBI::dbExecute(con, sprintf("CREATE TEMP TABLE %s AS SELECT row_number() OVER () AS rr_row, * FROM (%s)", rows_nm, src))
   props <- unique(c(
     if (length(cols)) paste0("rr_c", seq_along(cols)), if (length(pop)) "rr_row", title, hov, lab,
-    intersect(.rr_or(s$state[["choose_fields"]], character()), ctx$cols),
+    intersect(.rr_or(s$state[["choose_fields"]], character()), ctx$cols), own$fields,
     if (!is.null(t_s)) c("rr_t", ctx$by)
   ))
   if (!is.null(t_s)) {
@@ -263,12 +264,24 @@
                                    hover = if (length(hov)) TRUE))
     }
   )
+  layer$config$choose <- own$config
   meta <- .rr_popup_meta(pop, ctx$dict, a$labels, a$codes) # checked now, not on the first click
   if (length(pop)) {
     layer$row <- .rr_row_reader(con, rows_nm, pop, meta)
   }
   s$state$layer_section[[id]] <- a$section
   .rr_hold(.rr_quick_map(s, layer, list(con = con, name = attr(tiles, "table"))))
+}
+
+# A layer's own `choose`: the columns it names, and their lists for the page (each value with its rows and extent,
+# and each combination's), over this layer alone
+.rr_own_choose <- function(q, ctx) {
+  if (rlang::quo_is_null(q)) {
+    return(list(fields = character(), config = NULL))
+  }
+  fields <- unique(.rr_track_cols(q, ctx$cols))
+  .rr_quick_need(ctx, fields)
+  list(fields = fields, config = .rr_quick_choose(ctx, fields))
 }
 
 # The call's arguments for .rr_mark(): quosures for what may name columns, values for the rest; `color` for `colour`
@@ -325,7 +338,10 @@
 #' @param codes The labels of a coded column's values, shown beside each code: a named list by column, each a named
 #'   vector (`c("6" = "bottom trawl")`) or a table of code and label; by default the dictionary's, where it has them.
 #' @param hover A column whose value is shown beside the pointer.
-#' @param choose For the map's first layer from data: the columns whose values the reader picks, as for [rr_map()].
+#' @param choose The columns, written bare, whose values the reader picks to show of this layer alone, a list each
+#'   under the layer's name: chips for a column of up to 12 values, else a list to show one at a time, with ‹ and ›
+#'   to step. Several lists are linked: each offers only the values the others leave. For lists that drive every
+#'   layer with the column, give `choose` to [rr_map()].
 #' @param name,info The layer's name in the sidebar and the text behind its ⓘ.
 #' @param section The sidebar's box the layer sits in, by its title.
 #' @param visible Whether the layer is on when the page opens.
@@ -463,7 +479,8 @@ rr_text <- function(
 #'
 #' @inheritParams rr_point
 #' @param group The columns, written bare, whose values each have a line: one, or several, `c(id, leg)`. By default
-#'   none, one line through all the rows (and the map's `choose` columns, so a choice shows whole lines).
+#'   none, one line through all the rows (and the map's and the layer's `choose` columns, so a choice shows whole
+#'   lines).
 #' @param time The column that orders the rows, written bare: a time, or any column that orders (a distance along a
 #'   transect, a sequence number). A lazy table has no order of its own, so it is needed.
 #' @param max_gap_s A silence between two rows of a line longer than this many seconds breaks it, as `3600` for an
@@ -504,9 +521,10 @@ rr_path <- function(
   tcol <- .rr_one_col(rlang::enquo(time), "time")
   s <- .rr_quick(
     map, if (!is.null(data)) .rr_data(data), lon, lat, NULL, rlang::quo(NULL), "Map", 8790L,
-    rlang::enquo(choose), groups = FALSE
+    groups = FALSE
   )
   ctx <- s$ctx_layer
+  own <- .rr_own_choose(rlang::enquo(choose), ctx)
   ctx$time <- if (tcol %in% ctx$cols) tcol # the layer's, not the map's
   grp0 <- .rr_select(rlang::enquo(group), ctx$cols, "group")
   # on the map's own rows, the path's time and group are the map's too, for a time panel added after it (rr_time())
@@ -525,7 +543,7 @@ rr_path <- function(
   nm <- .rr_layer_names(s$state, name, "Paths")
   id <- nm$id
   grp <- .rr_select(rlang::enquo(group), ctx$cols, "group")
-  keys <- unique(c(grp, intersect(.rr_or(s$state[["choose_fields"]], character()), ctx$cols)))
+  keys <- unique(c(grp, intersect(.rr_or(s$state[["choose_fields"]], character()), ctx$cols), own$fields))
   col <- .rr_aes(colour_q, ctx$cols, "colour", colour = TRUE)
   if (length(col$columns) > 1) {
     stop("rr_path() is coloured by one column; for another, add another rr_path().", call. = FALSE)
@@ -605,6 +623,7 @@ rr_path <- function(
       Filter(Negate(is.null), list(click = sid, title = title, fields = fields, hover = if (length(hov)) TRUE))
     }
   )
+  layer$config$choose <- own$config
   s$state$max_gap_s <- .rr_or(s$state$max_gap_s, max_gap_s)
   s$state$layer_section[[id]] <- section
   .rr_hold(.rr_quick_map(s, layer, list(con = con, name = attr(tiles, "table"))))

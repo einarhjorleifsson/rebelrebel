@@ -113,12 +113,9 @@
   value_sql <- function(i) {
     if (as_is[i]) q(fields[i]) else sprintf("CAST(%s AS VARCHAR)", q(fields[i]))
   }
-  box_sql <- sprintf(
-    "count(*) AS n, min(%1$s) AS lon0, min(%2$s) AS lat0, max(%1$s) AS lon1, max(%2$s) AS lat1",
-    q(ctx$lon),
-    q(ctx$lat)
-  )
-  where <- sprintf("%s IS NOT NULL AND %s IS NOT NULL", q(ctx$lon), q(ctx$lat))
+  b <- .rr_box_sql(ctx$con, ctx$src, ctx$lon, ctx$lat, ctx$geometry)
+  box_sql <- b$select
+  where <- b$where
   key <- function(v, i) {
     if (is.na(v)) {
       "<NA>"
@@ -276,33 +273,38 @@
     by = by
   )
   .rr_quick_need(ctx, c(if (is.null(geometry)) c(lon, lat), by))
-  q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
-  box <- if (is.null(geometry)) {
-    DBI::dbGetQuery(
-      con,
-      sprintf(
-        "SELECT count(*) AS n, min(%1$s) AS lon0, max(%1$s) AS lon1, min(%2$s) AS lat0, max(%2$s) AS lat1
-         FROM (%3$s) WHERE %1$s IS NOT NULL AND %2$s IS NOT NULL",
-        q(lon),
-        q(lat),
-        ctx$src
-      )
-    )
-  } else {
-    .rr_extension(con, "spatial")
-    type <- DBI::dbGetQuery(con, sprintf("SELECT typeof(%s) AS t FROM (%s) LIMIT 1", q(geometry), ctx$src))$t
-    g <- if (length(type) && startsWith(type, "GEOMETRY")) q(geometry) else sprintf("ST_GeomFromWKB(%s)", q(geometry))
-    DBI::dbGetQuery(con, sprintf(
-      "SELECT count(*) AS n, min(ST_XMin(%1$s)) AS lon0, max(ST_XMax(%1$s)) AS lon1, min(ST_YMin(%1$s)) AS lat0,
-              max(ST_YMax(%1$s)) AS lat1 FROM (%2$s) WHERE %3$s IS NOT NULL",
-      g, ctx$src, q(geometry)
-    ))
-  }
+  b <- .rr_box_sql(con, ctx$src, ctx$lon, ctx$lat, geometry)
+  box <- DBI::dbGetQuery(con, sprintf("SELECT %s FROM (%s) WHERE %s", b$select, ctx$src, b$where))
   if (box$n == 0) {
     stop(if (is.null(geometry)) "No row has a position." else "No row has a shape.", call. = FALSE)
   }
   ctx$box <- box
   ctx
+}
+
+# The SQL of rows' count and extent, from lon and lat or from a shape (DuckDB's GEOMETRY or WKB), and of the rows
+# that have one: `select` to aggregate, `where` to keep
+.rr_box_sql <- function(con, src, lon, lat, geometry) {
+  q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
+  if (is.null(geometry)) {
+    return(list(
+      select = sprintf(
+        "count(*) AS n, min(%1$s) AS lon0, max(%1$s) AS lon1, min(%2$s) AS lat0, max(%2$s) AS lat1",
+        q(lon), q(lat)
+      ),
+      where = sprintf("%s IS NOT NULL AND %s IS NOT NULL", q(lon), q(lat))
+    ))
+  }
+  .rr_extension(con, "spatial")
+  type <- DBI::dbGetQuery(con, sprintf("SELECT typeof(%s) AS t FROM (%s) LIMIT 1", q(geometry), src))$t
+  g <- if (length(type) && startsWith(type, "GEOMETRY")) q(geometry) else sprintf("ST_GeomFromWKB(%s)", q(geometry))
+  list(
+    select = sprintf(
+      "count(*) AS n, min(ST_XMin(%1$s)) AS lon0, max(ST_XMax(%1$s)) AS lon1, min(ST_YMin(%1$s)) AS lat0, max(ST_YMax(%1$s)) AS lat1",
+      g
+    ),
+    where = sprintf("%s IS NOT NULL", q(geometry))
+  )
 }
 
 .rr_quick_need <- function(ctx, need) {

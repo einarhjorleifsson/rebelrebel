@@ -770,18 +770,9 @@ rr_map <- function(
     }
     layers[[i]]$config$colour <- co
   }
-  if (!is.null(choose)) {
-    one <- function(f) {
-      is.character(f$field) && length(f$field) == 1 && length(f$options) > 0
-    }
-    if (
-      !length(choose$fields) || !all(vapply(choose$fields, one, logical(1)))
-    ) {
-      stop(
-        "`choose` is a list of `fields`, each a `field`, its `options` (each a `value` and a `match`) and its `layers`.",
-        call. = FALSE
-      )
-    }
+  # the choices: the map's, over every layer with the field, and each layer's own, under its id in the address
+  owns <- Filter(function(l) !is.null(l$config$choose), layers)
+  if (!is.null(choose) || length(owns)) {
     taken <- c(
       ids,
       paste0(ids, "_by"),
@@ -812,31 +803,16 @@ rr_map <- function(
         )
       }))
     )
-    clash <- intersect(vapply(choose$fields, `[[`, "", "field"), taken)
-    if (length(clash)) {
-      stop(
-        sprintf(
-          "`choose` has a field, %s, named as the page's address names a layer or a control.",
-          paste(clash, collapse = ", ")
-        ),
-        call. = FALSE
-      )
-    }
-    # one-element arrays stay arrays in the config's JSON
-    choose$fields <- lapply(choose$fields, function(f) {
-      f$layers <- as.list(f$layers)
-      f$options <- lapply(f$options, function(o) {
-        if (!is.null(o$bbox)) {
-          o$bbox <- as.list(o$bbox)
-        }
-        o
-      })
-      f
-    })
-    choose$extents <- lapply(choose$extents, function(e) {
-      e$bbox <- as.list(e$bbox)
-      e
-    })
+  }
+  if (!is.null(choose)) {
+    choose <- .rr_choose_checked(choose, taken, "`choose`")
+    taken <- c(taken, vapply(choose$fields, `[[`, "", "field"))
+  }
+  for (l in owns) {
+    i <- match(l$config$id, ids)
+    layers[[i]]$config$choose <- .rr_choose_checked(
+      l$config$choose, taken, sprintf("Layer %s's `choose`", l$config$id), prefix = paste0(l$config$id, "_")
+    )
   }
   names(layers) <- ids
   config <- list(
@@ -1125,3 +1101,46 @@ format.rr_map <- function(x, ...) {
 
 .rr_or <- function(a, b) if (is.null(a)) b else a
 
+
+# A `choose` checked and made ready for the config's JSON: each field a `field` and its `options`, its address key
+# (the field's name, after `prefix` for a layer's own) not one the page uses already, and one-element arrays kept as
+# arrays
+.rr_choose_checked <- function(choose, taken, what, prefix = "") {
+  one <- function(f) {
+    is.character(f$field) && length(f$field) == 1 && length(f$options) > 0
+  }
+  if (!length(choose$fields) || !all(vapply(choose$fields, one, logical(1)))) {
+    stop(
+      what, " is a list of `fields`, each a `field`, its `options` (each a `value` and a `match`) and its `layers`.",
+      call. = FALSE
+    )
+  }
+  clash <- intersect(paste0(prefix, vapply(choose$fields, `[[`, "", "field")), taken)
+  if (length(clash)) {
+    stop(
+      sprintf(
+        "%s has a field, %s, named as the page's address names a layer or a control.",
+        what,
+        paste(substring(clash, nchar(prefix) + 1), collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  choose$fields <- lapply(choose$fields, function(f) {
+    if (!is.null(f$layers)) {
+      f$layers <- as.list(f$layers)
+    }
+    f$options <- lapply(f$options, function(o) {
+      if (!is.null(o$bbox)) {
+        o$bbox <- as.list(o$bbox)
+      }
+      o
+    })
+    f
+  })
+  choose$extents <- lapply(choose$extents, function(e) {
+    e$bbox <- as.list(e$bbox)
+    e
+  })
+  choose
+}

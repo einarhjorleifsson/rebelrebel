@@ -159,6 +159,26 @@ test_that("two lists are linked by the combinations the data hold, with their ro
   expect_setequal(mine, truth)
 })
 
+test_that("a layer's own choose: its lists, over it alone", {
+  skip_if_no_spatial()
+  x <- rr_example("trawlsurvey") |> dplyr::mutate(day = as.character(as.Date(time)))
+  m <- rr_map(x) |> rr_path(group = vid, time = time, choose = day) |> rr_point(choose = c(vid, day))
+  expect_null(m$config$choose)
+  ls <- m$config$layers
+  expect_equal(vapply(ls[[1]]$choose$fields, `[[`, "", "field"), "day")
+  expect_length(ls[[1]]$choose$extents, 0) # one list: nothing to link
+  expect_equal(vapply(ls[[2]]$choose$fields, `[[`, "", "field"), c("vid", "day"))
+  expect_equal(sum(vapply(ls[[2]]$choose$extents, `[[`, 0, "n")), dplyr::pull(dplyr::count(x), n))
+  # the paths are split by the chosen day, so a day shows whole lines of it
+  tb <- attr(m, "tables")[[1]]
+  expect_true("day" %in% DBI::dbListFields(tb$con, tb$name))
+  # shapes: each value's extent from its shapes
+  o <- (rr_example("trawlsurveytows") |> rr_line(choose = id.lgs))$config$layers[[1]]$choose$fields[[1]]$options
+  expect_length(o, 581)
+  expect_true(all(lengths(lapply(o, `[[`, "bbox")) == 4))
+  expect_error(rr_point(x, choose = nope), "No column nope")
+})
+
 test_that("lines, segments, areas and text: their style, legend and data", {
   skip_if_no_spatial()
   m <- rr_map(rr_example("trawlsurveytows")) |> rr_line(name = "Tows", hover = id.lgs, linewidth = 3)

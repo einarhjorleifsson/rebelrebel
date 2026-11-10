@@ -1,3 +1,11 @@
+# rebelrebel 2026.11.10.5
+
+* `choose` on a layer function is that layer's own: its lists under its name in the sidebar, over it alone, linked
+  as the map's are, and in the page's address under the layer's id and the field (`pings_vid=1131`). A path is split
+  by its own `choose` columns too, so a choice shows whole lines. Before, a layer function that started a map gave its
+  `choose` to the map; the map's lists are now given to `rr_map()` alone.
+* Lists over shapes (`rr_line()`, `rr_polygon()`) take each value's extent from its shapes.
+
 # rebelrebel 2026.11.10.4
 
 * `choose`'s lists are linked: each offers only the values the other lists' choices leave, from the combinations the
