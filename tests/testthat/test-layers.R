@@ -144,8 +144,7 @@ test_that("rr_map(data, choose = ) names the columns the reader picks", {
 
 test_that("two lists are linked by the combinations the data hold, with their rows", {
   skip_if_no_spatial()
-  # text is a list; a number would be a range (an id cast to whole first: DuckDB writes the double 1131 as 1131.0)
-  x <- rr_example("trawlsurvey") |> dplyr::mutate(vid = as.character(as.integer(vid)), day = as.character(as.Date(time)))
+  x <- rr_example("trawlsurvey") |> dplyr::mutate(day = as.character(as.Date(time)))
   ch <- (rr_map(x, choose = c(vid, day)) |> rr_point())$config$choose
   rows <- dplyr::pull(dplyr::count(x), n)
   # each option's value alone, for the page's counts as the lists narrow
@@ -160,9 +159,34 @@ test_that("two lists are linked by the combinations the data hold, with their ro
   expect_setequal(mine, truth)
 })
 
+test_that("an id or a code is a list, a measure a range: as declared, else as stored", {
+  skip_if_no_spatial()
+  kind <- function(m) vapply(m$config$choose$fields, function(f) .rr_or(f$range, "list"), "")
+  # the survey's vid: an integer, and its dictionary's number(id)
+  m <- rr_map(rr_example("trawlsurvey"), choose = c(vid, speed)) |> rr_point()
+  expect_equal(kind(m), c("list", "number"))
+  expect_equal(m$config$choose$fields[[1]]$options[[1]]$label, "1131 (2,164)")
+  # stored: a whole number a list, a fraction a range
+  d <- data.frame(id = 1:3, n = c(2.5, 3, 4), lon = c(-20, -21, -22), lat = c(64, 65, 66))
+  expect_equal(kind(rr_map(d, choose = c(id, n)) |> rr_point()), c("list", "number"))
+  # a double the file's dictionary declares an id: a list, written whole, and coloured as categories
+  f <- tempfile(fileext = ".parquet")
+  con <- DBI::dbConnect(duckdb::duckdb())
+  dict <- "columns:\n  - name: id\n    type: number(id)\n  - name: n\n    type: number(quantity)\n"
+  DBI::dbExecute(con, sprintf(
+    "COPY (SELECT CAST(i AS DOUBLE) AS id, i * 1.5 AS n, -20 - i AS lon, 64 + i / 10 AS lat FROM range(1, 4) t(i))
+     TO '%s' (FORMAT parquet, KV_METADATA {'x.data_dict': '%s'})", f, dict))
+  DBI::dbDisconnect(con, shutdown = TRUE)
+  m <- rr_map(f, choose = c(id, n)) |> rr_point(colour = id)
+  expect_equal(kind(m), c("list", "number"))
+  expect_equal(vapply(m$config$choose$fields[[1]]$options, `[[`, "", "value"), c("1", "2", "3"))
+  expect_equal(paint(m)[["circle-color"]][[1]], "match")
+  expect_true(all(c("1", "2", "3") %in% unlist(paint(m)[["circle-color"]])))
+})
+
 test_that("a number, a date or a time is a range of bins, linked as the lists are", {
   skip_if_no_spatial()
-  x <- rr_example("trawlsurvey") |> dplyr::mutate(vid = as.character(vid), day = as.Date(time))
+  x <- rr_example("trawlsurvey") |> dplyr::mutate(day = as.Date(time))
   rows <- dplyr::pull(dplyr::count(x), n)
   ch <- (rr_map(x, choose = c(vid, day, speed, time)) |> rr_point())$config$choose
   f <- stats::setNames(ch$fields, vapply(ch$fields, `[[`, "", "field"))
@@ -214,7 +238,7 @@ test_that("a layer's own choose: its lists, over it alone", {
   o <- (tows |> rr_line(choose = tow))$config$layers[[1]]$choose$fields[[1]]$options
   expect_length(o, 581)
   expect_true(all(lengths(lapply(o, `[[`, "bbox")) == 4))
-  r <- (tows |> rr_line(choose = id.lgs))$config$layers[[1]]$choose$fields[[1]]
+  r <- (tows |> dplyr::mutate(half = id.lgs / 2) |> rr_line(choose = half))$config$layers[[1]]$choose$fields[[1]]
   expect_equal(r$range, "number")
   expect_true(all(lengths(lapply(Filter(function(b) b$n > 0, r$bins), `[[`, "bbox")) == 4))
   expect_error(rr_point(x, choose = nope), "No column nope")

@@ -641,10 +641,12 @@ rr_section <- function(id, title = id, layers, open = TRUE) {
 #'   `choose` names. A choice goes into the address under the field's name, several values separated by commas, a
 #'   range as `from..to`, and nothing is fetched again.
 #'   For a map started from data, its columns written bare, `choose = c(id, year)`, made from the data and linked:
-#'   text, a factor or a logical is a list of its values (chips for up to 12); a number, a date or a time is a range
-#'   with two handles, over each of its values where it has at most 64, else over bins between `pretty()` breaks. A
-#'   numeric id is a list once it is text: `mutate(id = as.character(as.integer(id)))` (DuckDB writes a double's text
-#'   with a decimal, `1131.0`). A path is split by a range's bins, so a choice shows whole runs.
+#'   text, a factor, a logical or a whole number (an id, a code, a year as an integer) is a list of its values (chips
+#'   for up to 12); a fraction, a date or a time is a range with two handles, over each of its values where it has at
+#'   most 64, else over bins between `pretty()` breaks. Where the data's dictionary (data-dict.tidyverse.org's, in the
+#'   parquet file's metadata) gives a column's type, it decides: `number(id)`, `enum`, `string` or `boolean` a list,
+#'   `number`, `number(quantity)`, `date` or `datetime` a range. A path is split by a range's bins, so a choice shows
+#'   whole runs.
 #' @param sections For a map started from data, the sidebar's boxes the layers name (their `section`), each a `title`
 #'   and whether it is `open`: `list(Reference = list(open = FALSE))`.
 #' @param palette The grid's palette when the page opens: an `id` of `palettes`.

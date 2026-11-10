@@ -93,7 +93,7 @@ rr_example <- function(name = NULL, con = NULL) {
 .rr_dataset_rd <- function(name) {
   # read_yaml() re-encodes to the session's encoding and, outside a UTF-8 locale, stops at the first non-ASCII
   # character without an error, dropping the datasets after it
-  dd <- yaml::yaml.load(readLines(
+  dd <- .rr_yaml(readLines(
     system.file("extdata", "data-dict.yaml", package = "rebelrebel"),
     encoding = "UTF-8"
   ))

@@ -189,9 +189,38 @@
 
 # What a column is, for its colours: discrete (text, a logical, a factor, its levels when it has them, ordered or not)
 # or continuous (a number; a date or a time, coloured by its seconds and labelled as a date or a time)
-.rr_column_type <- function(con, src, column, ordered = FALSE) {
+# What a data dictionary's type (data-dict.tidyverse.org's) says a column is for choosing and colouring: "list" for an
+# id, a code, text or a logical (`number(id)`, `enum`, `string`, `boolean`), "range" for a measure, a date or a time
+# (`number`, `number(quantity)`, `date`, `datetime`, `time`), "" where it says neither or there is none
+.rr_declared <- function(type) {
+  if (!is.character(type) || length(type) != 1 || is.na(type)) {
+    return("")
+  }
+  if (grepl("\\(id\\)|^enum|^string|^boolean", type)) {
+    "list"
+  } else if (grepl("^number(\\(quantity\\))?$|^date|^time", type)) {
+    "range"
+  } else {
+    ""
+  }
+}
+
+# A category's text in SQL: a number written whole where it is whole (an id stored as a double, 1131 not 1131.0)
+.rr_category_sql <- function(col, type) {
+  if (isTRUE(type$numeric)) {
+    sprintf("CASE WHEN %1$s = round(%1$s) THEN CAST(CAST(%1$s AS BIGINT) AS VARCHAR) ELSE CAST(%1$s AS VARCHAR) END", col)
+  } else {
+    sprintf("CAST(%s AS VARCHAR)", col)
+  }
+}
+
+.rr_column_type <- function(con, src, column, ordered = FALSE, declared = NULL) {
   q <- as.character(DBI::dbQuoteIdentifier(con, column))
   one <- DBI::dbGetQuery(con, sprintf("SELECT %s AS v FROM (%s) LIMIT 0", q, src))$v
+  # a number the data's dictionary calls an id or a code (data-dict's `number(id)`, `enum`): a category
+  if (is.numeric(one) && .rr_declared(declared) == "list") {
+    return(list(kind = "discrete", numeric = TRUE))
+  }
   if (is.factor(one)) {
     return(list(kind = "discrete", levels = levels(one), ordered = ordered || is.ordered(one)))
   }

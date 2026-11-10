@@ -136,12 +136,14 @@
   main <- if (mark == "polygon") "fill" else "colour"
   col <- .rr_aes(a[[main]], ctx$cols, main, colour = TRUE)
   cols <- col$columns
-  types <- lapply(cols, function(cc) .rr_column_type(con, ctx$src, cc, ordered = cc %in% ctx$ordered))
+  types <- lapply(cols, function(cc) {
+    .rr_column_type(con, ctx$src, cc, ordered = cc %in% ctx$ordered, declared = ctx$dict[[cc]]$type)
+  })
   props_sql <- vapply(seq_along(cols), function(i) {
     t <- types[[i]]
     sprintf(
       ", %s AS rr_c%d",
-      if (t$kind == "discrete") sprintf("CAST(%s AS VARCHAR)", q(cols[i]))
+      if (t$kind == "discrete") .rr_category_sql(q(cols[i]), t)
       else if (!is.null(t$time)) sprintf("epoch(%s)", q(cols[i]))
       else sprintf("CAST(%s AS DOUBLE)", q(cols[i])),
       i
@@ -191,7 +193,7 @@
   if (length(hov) > 1) stop("`hover` is one column.", call. = FALSE)
   title <- if (length(hov)) hov else if (length(pop)) pop[1]
   fields <- lapply(setdiff(pop, title), function(f) {
-    t <- .rr_column_type(con, ctx$src, f)
+    t <- .rr_column_type(con, ctx$src, f, declared = ctx$dict[[f]]$type)
     Filter(Negate(is.null), list(field = f, label = f, format = if (t$kind == "continuous" && is.null(t$time)) "value"))
   })
   # what a thinning keeps apart in a pixel, so that nothing the page draws or filters is lost: each colour (a number's
@@ -470,8 +472,9 @@
 #'   vector (`c("6" = "bottom trawl")`) or a table of code and label; by default the dictionary's, where it has them.
 #' @param hover A column whose value is shown beside the pointer.
 #' @param choose The columns, written bare, whose values the reader picks to show of this layer alone, each under
-#'   the layer's name: text, a factor or a logical as a list (chips for up to 12 values, else a list to show one at a
-#'   time), a number, a date or a time as a range with two handles; ‹ and › step through either. Several are linked:
+#'   the layer's name: text, a factor, a logical or a whole number (an id, a code) as a list (chips for up to 12
+#'   values, else a list to show one at a time), a fraction, a date or a time as a range with two handles, unless the
+#'   data's dictionary declares otherwise (as for [rr_map()]); ‹ and › step through either. Several are linked:
 #'   each offers only the values the others leave. For choices that drive every layer with the column, give `choose`
 #'   to [rr_map()].
 #' @param name,info The layer's name in the sidebar and the text behind its ⓘ.
@@ -681,7 +684,7 @@ rr_path <- function(
     stop("rr_path() is coloured by one column; for another, add another rr_path().", call. = FALSE)
   }
   cc <- col$columns
-  type <- if (length(cc)) .rr_column_type(con, ctx$src, cc, ordered = cc %in% ctx$ordered)
+  type <- if (length(cc)) .rr_column_type(con, ctx$src, cc, ordered = cc %in% ctx$ordered, declared = ctx$dict[[cc]]$type)
   gap <- .rr_gap_sql(max_gap_s)
   t_s <- .rr_time_s_sql(con, ctx$src, ctx$time)
   .rr_extension(con, "spatial")
@@ -704,7 +707,7 @@ rr_path <- function(
   lines_src <- .rr_runs_sql(
     con, run_src, ctx$lon, ctx$lat, ctx$time, run_keys,
     values = if (length(cc)) {
-      if (type$kind == "discrete") sprintf("CAST(%s AS VARCHAR)", q(cc))
+      if (type$kind == "discrete") .rr_category_sql(q(cc), type)
       else if (!is.null(type$time)) sprintf("epoch(%s)", q(cc))
       else sprintf("CAST(%s AS DOUBLE)", q(cc))
     },
@@ -901,17 +904,24 @@ rr_path <- function(
       DBI::dbQuoteString(con, p)
     ))$v, error = function(e) character())
     if (!length(kv)) next
-    entry <- tryCatch(yaml::yaml.load(enc2utf8(kv[1])), error = function(e) NULL)
+    entry <- tryCatch(.rr_yaml(enc2utf8(kv[1])), error = function(e) NULL)
     for (c in entry$columns) {
       if (is.null(c$name) || !is.null(out[[c$name]])) next
       codes <- if (is.list(c$values) && !is.null(names(c$values))) unlist(c$values)
       out[[c$name]] <- Filter(Negate(is.null), list(
-        label = c$label, unit = c$units, description = if (!is.null(c$description)) trimws(c$description),
+        label = c$label, unit = c$units, description = if (!is.null(c$description)) trimws(c$description), type = c$type,
         codes = if (length(codes)) stats::setNames(as.character(codes), names(codes))
       ))
     }
   }
   out
+}
+
+# A dictionary's YAML read, YAML 1.1's yes, no, on, off, y and n kept as written, not made TRUE and FALSE: a column
+# may be called n
+.rr_yaml <- function(text) {
+  as_written <- function(x) x
+  yaml::yaml.load(text, handlers = list("bool#yes" = as_written, "bool#no" = as_written))
 }
 
 # Two dictionaries as one, the first's entries winning, field by field

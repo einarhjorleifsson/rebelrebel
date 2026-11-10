@@ -1,3 +1,15 @@
+# rebelrebel 2026.11.10.8
+
+* An id is a list, not a range: in `choose`, a whole number (stored as an integer) is a list, as text is, and a
+  fraction, a date or a time a range. Where the data's dictionary (data-dict.tidyverse.org's, in the parquet file's
+  metadata) gives a column's type, it decides: `number(id)`, `enum`, `string` or `boolean` a list, `number`,
+  `number(quantity)`, `date` or `datetime` a range. A number declared an id is coloured as categories too, and written
+  whole (`1131`, not `1131.0`).
+* The examples' ids are stored as integers: `trawlsurvey`'s `vid` and `trawlsurveytows`' `id.lgs`, every row and the
+  files' metadata kept (`data-raw/integer_ids.R`).
+* `rr_map("file.parquet")` reads the file: a path given to the map itself was not read before.
+* A dictionary's YAML keeps `n`, `y`, `no`, `yes`, `on` and `off` as written: a column called `n` stopped the reader.
+
 # rebelrebel 2026.11.10.7
 
 * `choose` takes ranges: a number, a date or a time is a slider with two handles, over each of its values where it has

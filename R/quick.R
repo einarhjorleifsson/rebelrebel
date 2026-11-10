@@ -20,7 +20,7 @@
   if (!is.null(state$pending)) {
     p <- state$pending
     state <- list(
-      ctx = .rr_quick_data(p$data, NULL, NULL, NULL, rlang::quo(NULL), NULL),
+      ctx = .rr_quick_data(.rr_data(p$data), NULL, NULL, NULL, rlang::quo(NULL), NULL), # a path read as a table
       layers = list(), tables = list(), boxes = list(), title = p$title, port = p$port, sections = p$sections
     )
     if (!groups) {
@@ -102,11 +102,19 @@
   }
   con <- ctx$con
   q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
-  kind <- vapply(fields, function(f) {
-    v <- dplyr::collect(utils::head(dplyr::select(ctx$x, dplyr::all_of(f)), 1))[[1]]
-    if (inherits(v, "POSIXct")) "time" else if (inherits(v, "Date")) "date" else if (is.numeric(v)) "number"
-    else if (is.logical(v)) "logical" else "text"
-  }, "", USE.NAMES = FALSE)
+  # a list or a range: as the data's dictionary declares it (an id or a code a list, a measure a range), else by how
+  # it is stored: a whole number (an id, a code, a year) a list as text is, a fraction, a date or a time a range
+  stored <- DBI::dbGetQuery(con, sprintf("DESCRIBE SELECT %s FROM (%s)", paste(q(fields), collapse = ", "), ctx$src))$column_type
+  kind <- vapply(seq_along(fields), function(i) {
+    t <- stored[i]
+    store <- if (grepl("^U?(TINY|SMALL|BIG|HUGE)?INT(EGER)?$", t)) "id"
+      else if (grepl("^(FLOAT|DOUBLE|REAL)$|^DECIMAL", t)) "number" else if (t == "DATE") "date"
+      else if (startsWith(t, "TIMESTAMP")) "time" else if (t == "BOOLEAN") "logical" else "text"
+    if (!store %in% c("id", "number")) {
+      return(store)
+    }
+    switch(.rr_declared(ctx$dict[[fields[i]]]$type), list = "id", range = "number", store)
+  }, "")
   b <- .rr_box_sql(con, ctx$src, ctx$lon, ctx$lat, ctx$geometry)
   box <- function(r, j) c(r$lon0[j], r$lat0[j], r$lon1[j], r$lat1[j])
   num <- function(x) format(x, scientific = FALSE, trim = TRUE, digits = 15)
@@ -164,8 +172,8 @@
   value_sql <- function(i) {
     if (is_range[i]) {
       sprintf("CASE WHEN %s IS NULL THEN NULL ELSE %s END", q(fields[i]), ranges[[i]]$sql)
-    } else if (kind[i] == "logical") {
-      q(fields[i])
+    } else if (kind[i] %in% c("logical", "id")) {
+      q(fields[i]) # matched as the tiles carry it, a number as a number
     } else {
       sprintf("CAST(%s AS VARCHAR)", q(fields[i]))
     }
