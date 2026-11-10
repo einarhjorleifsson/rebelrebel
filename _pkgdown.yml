@@ -1,0 +1,56 @@
+url: https://einarhjorleifsson.github.io/rebelrebel/
+
+template:
+  bootstrap: 5
+
+reference:
+- title: "Start a map"
+  desc: >
+    A map from data, which the layer functions add to with the pipe.
+  contents:
+  - rr_map
+- title: "Layers"
+  desc: >
+    A mark each, one row of the data to one mark: points, paths (rows joined in time), lines, segments, areas and
+    text.
+  contents:
+  - rr_point
+  - rr_path
+- title: "Time"
+  desc: >
+    A panel under the map: a group's rows over time, linked to the map.
+  contents:
+  - rr_time
+- title: "In MapLibre's own terms"
+  desc: >
+    A layer, its section and its tiles made by hand, for what the layer functions do not draw.
+  contents:
+  - rr_layer
+  - rr_section
+  - rr_tiles_table
+  - rr_tiles_dem
+  - rr_tiles_mbtiles
+- title: "Colours and base maps"
+  contents:
+  - rr_palettes
+- title: "Show and share"
+  desc: >
+    A map served from R on this machine, or written as a folder that opens with no R.
+  contents:
+  - print.rr_map
+  - rr_serve
+  - rr_bundle
+- title: "What readers write"
+  desc: >
+    Notes and verdicts written on a served map, kept in a file beside it.
+  contents:
+  - rr_notes
+  - rr_verdicts
+- title: "Example data"
+  contents:
+  - rr_example
+  - dansk
+  - dansk_harbours
+  - dansk_relief
+  - trawlsurvey
+  - trawlsurveytows

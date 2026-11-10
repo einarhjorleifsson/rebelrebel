@@ -15,7 +15,8 @@ Description: Interactive maps of parquet files and 'DuckDB' tables, drawn in the
     with no R and no network but the base map's. Moved from the R package
     'ramb', whose map viewer it was.
 License: GPL (>= 3)
-URL: https://github.com/einarhjorleifsson/rebelrebel
+URL: https://einarhjorleifsson.github.io/rebelrebel/,
+    https://github.com/einarhjorleifsson/rebelrebel
 BugReports: https://github.com/einarhjorleifsson/rebelrebel/issues
 Encoding: UTF-8
 Depends:
