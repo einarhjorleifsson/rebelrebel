@@ -16,6 +16,7 @@ rr_point(
   colour = NULL,
   size = NULL,
   opacity = NULL,
+  thin = TRUE,
   palette = NULL,
   limits = NULL,
   stretch = NULL,
@@ -152,9 +153,17 @@ shown. A column's colours by default: Okabe-Ito for up to eight values, Paired f
 beyond, the rest grey as "other"; viridis for an ordered factor and for numbers, dates and times. \code{color} is the
 same.}
 
-\item{size}{A point's diameter, a text's size, in pixels.}
+\item{size}{A point's diameter, a text's size, in pixels. For points, by default, a size that follows the zoom:
+the least, 2 pixels, until the zoom at which most points lie that far apart, then doubling with each zoom in, as
+a size on the ground does, up to the most, 8; \code{size = c(1, 12)} gives other bounds, one number a size that
+stays.}
 
 \item{opacity}{The marks' opacity, 0-1.}
+
+\item{thin}{For points: in each tile, one point for each screen pixel, \code{TRUE} (each colour, each value a \code{choose}
+list picks and each group of a time panel keeping its own), so a tile of millions of rows reaches the page as
+what can be seen of them; a number of pixels for coarser cells; \code{FALSE} keeps every point. At the layer's
+deepest zoom (\code{maxzoom}, 14 by default) and beyond, only points that would be drawn on one spot are dropped.}
 
 \item{palette}{The colours for a column, in place of the default: a palette's name (from \code{\link[=rr_palettes]{rr_palettes()}},
 \code{palette.pals()} or \code{hcl.pals()}, written loosely: \code{"set1"} is Set 1), colours, colours named by value

@@ -7,7 +7,7 @@ paint <- function(m, i = 1) layer(m, i)$style[[1]]$paint
 test_that("every layer function takes its arguments in the plan's one order", {
   order <- c(
     "map", "data", "lon", "lat", "lon_end", "lat_end", "group", "time", "max_gap_s", "elevation", "of", "cell", "fun",
-    "colour", "fill", "size", "linewidth", "opacity", "label",
+    "colour", "fill", "size", "linewidth", "opacity", "thin", "label",
     "palette", "limits", "breaks", "stretch", "legend",
     "popup", "labels", "codes", "hover", "choose",
     "name", "info", "section", "visible",
@@ -177,6 +177,47 @@ test_that("a layer's own choose: its lists, over it alone", {
   expect_length(o, 581)
   expect_true(all(lengths(lapply(o, `[[`, "bbox")) == 4))
   expect_error(rr_point(x, choose = nope), "No column nope")
+})
+
+test_that("points thinned in a tile: one a pixel and class, and at the deepest zoom one a spot", {
+  skip_if_no_spatial()
+  x <- dplyr::mutate(rr_example("dansk"), colour = behaviour)
+  whole <- rr_tiles_table(x, lon = "lon", lat = "lat", properties = "colour")
+  one <- rr_tiles_table(x, lon = "lon", lat = "lat", properties = "colour", thin = list(px = 1, until = 14))
+  by <- rr_tiles_table(x, lon = "lon", lat = "lat", properties = "colour", thin = list(px = 1, by = "colour", until = 14))
+  n <- function(f, z, x, y) unname(mvt_count(f(z, x, y))["features"])
+  # the busiest tile at zoom 6, as measured (fishycode plan 072 §3.15): 140,734 points, 3,510 a pixel and colour
+  expect_equal(n(whole, 6, 33, 19), 140734)
+  expect_equal(n(by, 6, 33, 19), 3510)
+  expect_lt(n(one, 6, 33, 19), n(by, 6, 33, 19)) # each colour keeps its own
+  expect_identical(by(6, 33, 19), by(6, 33, 19)) # the same points every time
+  # at the deepest zoom, a harbour's 14,577 points on 855 spots of the tile's own grid
+  expect_equal(n(whole, 14, 8712, 4910), 14577)
+  expect_equal(n(by, 14, 8712, 4910), 855)
+  expect_error(rr_tiles_table(x, lon = "lon", lat = "lat", thin = list(px = 1)), "`thin` is a list")
+})
+
+test_that("a point layer: thinned by default, its size following the zoom", {
+  skip_if_no_spatial()
+  d <- rr_example("dansk")
+  m <- rr_point(d, colour = behaviour)
+  r <- paint(m)[["circle-radius"]]
+  expect_equal(r[1:3], list("interpolate", list("exponential", 2), list("zoom")))
+  expect_equal(c(r[[5]], r[[7]]), c(1, 4)) # 2 to 8 pixels across
+  expect_equal(r[[6]] - r[[4]], 2) # doubling with each zoom in
+  expect_equal(r[[4]], 12) # dansk's pings lie two pixels apart at zoom 12
+  expect_equal(paint(rr_point(d, size = 6))[["circle-radius"]], 3)
+  expect_equal(paint(rr_point(d, size = 6))[["circle-stroke-width"]], 0.5)
+  b <- paint(rr_point(rr_example("trawlsurvey"), size = c(1, 12)))[["circle-radius"]]
+  expect_equal(c(b[[5]], b[[7]]), c(0.5, 6))
+  expect_error(rr_point(d, size = c(8, 2)), "the least first")
+  expect_error(rr_point(d, thin = "yes"), "`thin` is TRUE")
+  # the busiest tile at zoom 6 thinned, and whole with thin = FALSE
+  n <- function(m) unname(mvt_count(m$layers[[1]]$tiles(6, 33, 19))["features"])
+  expect_equal(n(m), 3510)
+  expect_equal(n(rr_point(d, colour = behaviour, thin = FALSE)), 140734)
+  # a choose list keeps its values apart: a vessel chosen loses none of its points to another's
+  expect_gt(n(rr_point(d, colour = behaviour, choose = vessel_id)), 3510)
 })
 
 test_that("lines, segments, areas and text: their style, legend and data", {

@@ -1,3 +1,17 @@
+# rebelrebel 2026.11.10.6
+
+* Points are thinned in each tile by default (`rr_point(thin = TRUE)`): one a screen pixel, each colour (a number's in
+  eight classes), each value a `choose` list picks and each group of a time panel keeping its own, so a tile of
+  millions of rows reaches the page as what can be seen of it. From the layer's deepest zoom (`maxzoom`, 14 by
+  default) only points that would be drawn on one spot are dropped, so every point that can be told apart can be
+  clicked. On a year of national AIS pings (32.8 million), the busiest tile at zoom 6 went from 245 MB and 8.9 s to
+  8.7 MB and 0.9 s; at zoom 14, from 51 MB to 3.9 MB. `thin = FALSE` keeps every point; a number of pixels thins more.
+* A point's size follows the zoom by default: 2 pixels across until the zoom at which most points lie that far apart,
+  then doubling with each zoom in, as a size on the ground does, up to 8. `size = c(1, 12)` sets other bounds, one
+  number a size that stays. The outline shows once a point is 3 pixels across.
+* `rr_tiles_table(thin = )`, the same for any table of points; a thinned tile's features in the table's order, so its
+  bytes are the same every time.
+
 # rebelrebel 2026.11.10.5
 
 * `choose` on a layer function is that layer's own: its lists under its name in the sidebar, over it alone, linked

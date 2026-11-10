@@ -295,9 +295,7 @@
       where = sprintf("%s IS NOT NULL AND %s IS NOT NULL", q(lon), q(lat))
     ))
   }
-  .rr_extension(con, "spatial")
-  type <- DBI::dbGetQuery(con, sprintf("SELECT typeof(%s) AS t FROM (%s) LIMIT 1", q(geometry), src))$t
-  g <- if (length(type) && startsWith(type, "GEOMETRY")) q(geometry) else sprintf("ST_GeomFromWKB(%s)", q(geometry))
+  g <- .rr_geom_sql(con, src, geometry)
   list(
     select = sprintf(
       "count(*) AS n, min(ST_XMin(%1$s)) AS lon0, max(ST_XMax(%1$s)) AS lon1, min(ST_YMin(%1$s)) AS lat0, max(ST_YMax(%1$s)) AS lat1",
@@ -305,6 +303,15 @@
     ),
     where = sprintf("%s IS NOT NULL", q(geometry))
   )
+}
+
+# A shape column as DuckDB's GEOMETRY in SQL: as it is, or read from WKB (a BLOB)
+.rr_geom_sql <- function(con, src, geometry) {
+  .rr_extension(con, "spatial")
+  q <- as.character(DBI::dbQuoteIdentifier(con, geometry))
+  type <- DBI::dbGetQuery(con, sprintf("SELECT typeof(%s) AS t FROM (%s) LIMIT 1", q, src))$t
+  # DuckDB's GEOMETRY may carry its CRS in the type, GEOMETRY('OGC:CRS84')
+  if (length(type) && startsWith(type, "GEOMETRY")) q else sprintf("ST_GeomFromWKB(%s)", q)
 }
 
 .rr_quick_need <- function(ctx, need) {

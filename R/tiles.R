@@ -15,6 +15,13 @@
 #' @param layer The tile layer of the features.
 #' @param points The tile layer of a point on every feature (`ST_PointOnSurface()`), for the zooms where an area is
 #'   too small to see; `NULL` for none.
+#' @param thin Points thinned in each tile, where a screen pixel holds many: `NULL` for none, or a list of `px`, the
+#'   side in screen pixels of the cells that each keep one point (a tile drawn 512 pixels wide); `by`, columns whose
+#'   values each keep their own point in a cell (a colour's classes, a column chosen in the page), carried in the
+#'   tiles only if `properties` names them; and `until`, the zoom from which only the points on one spot of a tile's own
+#'   grid (4,096 a side, an eighth of a pixel) are dropped, the source's deepest, so that every point that can be told
+#'   apart can be clicked there and beyond. The point kept is a cell's first in the table's order, the same every
+#'   time. Lines and areas are kept whole.
 #' @return A function of `z`, `x`, `y` returning a tile (raw bytes), with the number of features as its `count`
 #'   attribute, the temporary table's name as its `table` attribute, and as `tiles_at` a function of a zoom giving the
 #'   tiles that hold a feature (`x`, `y`), by which [rr_bundle()] writes only those.
@@ -33,8 +40,16 @@ rr_tiles_table <- function(
   lat = NULL,
   properties = NULL,
   layer = "features",
-  points = NULL
+  points = NULL,
+  thin = NULL
 ) {
+  if (!is.null(thin)) {
+    ok <- is.list(thin) && is.numeric(thin$px) && length(thin$px) == 1 && thin$px > 0 &&
+      is.numeric(thin$until) && length(thin$until) == 1 && (is.null(thin$by) || is.character(thin$by))
+    if (!ok) {
+      stop("`thin` is a list of `px` (pixels), `until` (a zoom) and `by` (columns), or NULL.", call. = FALSE)
+    }
+  }
   con <- .rr_con_for(x)
   # a data frame registered here is the tile function's for the session (it remakes its table from it)
   .rr_scope()
@@ -44,25 +59,19 @@ rr_tiles_table <- function(
   g <- if (!is.null(lon)) {
     sprintf("ST_Point(%s, %s)", q(lon), q(lat))
   } else {
-    type <- DBI::dbGetQuery(
-      con,
-      sprintf("SELECT typeof(%s) AS t FROM (%s) LIMIT 1", q(geometry), src)
-    )$t
-    # DuckDB's GEOMETRY may carry its CRS in the type, GEOMETRY('OGC:CRS84'); WKB is a BLOB
-    if (startsWith(type, "GEOMETRY")) {
-      q(geometry)
-    } else {
-      sprintf("ST_GeomFromWKB(%s)", q(geometry))
-    }
+    .rr_geom_sql(con, src, geometry)
   }
   props <- vapply(properties, function(p) as.character(q(p)), "")
+  # the columns a thinning keeps apart, kept in the table beside the properties; and the table's order, for the point
+  # each cell keeps
+  kept <- vapply(unique(c(properties, thin$by)), function(p) as.character(q(p)), "")
   nm <- .rr_name(con, "rb_tiles_")
   make <- function() {
     DBI::dbExecute(con, create)
   }
   create <- sprintf(
     "CREATE TEMP TABLE %s AS
-     WITH p AS (SELECT %s %s AS g FROM (%s)),
+     WITH p AS (SELECT %s %s AS g%s FROM (%s)),
      m AS (
        SELECT * EXCLUDE (g),
               CASE WHEN ST_GeometryType(g) IN ('POINT', 'MULTIPOINT') THEN 'point'
@@ -72,8 +81,9 @@ rr_tiles_table <- function(
        FROM p WHERE g IS NOT NULL)
      SELECT *, ST_XMin(g3857) AS xmin, ST_XMax(g3857) AS xmax, ST_YMin(g3857) AS ymin, ST_YMax(g3857) AS ymax FROM m",
     nm,
-    if (length(props)) paste0(paste(props, collapse = ", "), ",") else "",
+    if (length(kept)) paste0(paste(kept, collapse = ", "), ",") else "",
     g,
+    if (is.null(thin)) "" else ", row_number() OVER () AS rr_n",
     src
   )
   make()
@@ -98,24 +108,44 @@ rr_tiles_table <- function(
   )
   # the layers are written apart and joined: a tile's layers are protobuf messages, so their bytes concatenate
   tile <- function(z, x, y) {
+    # thinned, the features in the table's order, so a tile's bytes and the order its points are drawn in are the same
+    # every time (a parallel aggregate writes them in any order)
     one <- function(geom, name, where) {
       sprintf(
-        "(SELECT ST_AsMVT({'geometry': ST_AsMVTGeom(%s, ST_Extent(env), 4096, 64, true), %s}, %s, 4096) FROM f, e %s)",
+        "(SELECT ST_AsMVT({'geometry': ST_AsMVTGeom(%s, ST_Extent(env), 4096, 64, true), %s}, %s, 4096%s) FROM f, e %s)",
         geom,
         fields,
         DBI::dbQuoteString(con, name),
+        if (is.null(thin)) "" else " ORDER BY rr_n",
         where
+      )
+    }
+    # a tile's points one a cell of `px` screen pixels and of each value of `by`, the cell's first; from `until` on,
+    # one a unit of the tile's own grid, the points it would draw on one spot
+    cells <- if (!is.null(thin)) {
+      cell <- sprintf("((ST_XMax(e.env) - ST_XMin(e.env)) / %.6f)", if (z < thin$until) 512 / thin$px else 4096)
+      sprintf(
+        ",
+       f AS (SELECT f0.* FROM f0, e WHERE kind <> 'point'
+             UNION ALL
+             SELECT f0.* FROM f0, e WHERE kind = 'point'
+             QUALIFY row_number() OVER (PARTITION BY floor((xmin - ST_XMin(e.env)) / %1$s), floor((ymin - ST_YMin(e.env)) / %1$s)%2$s
+                                        ORDER BY rr_n) = 1)",
+        cell,
+        if (length(thin$by)) paste0(", ", vapply(thin$by, function(p) as.character(q(p)), ""), collapse = "") else ""
       )
     }
     sql <- sprintf(
       "WITH e AS (SELECT ST_TileEnvelope(%d, %d, %d) AS env),
-       f AS (SELECT t.* FROM %s t, e
-             WHERE t.xmax >= ST_XMin(e.env) AND t.xmin <= ST_XMax(e.env) AND t.ymax >= ST_YMin(e.env) AND t.ymin <= ST_YMax(e.env))
+       %s AS (SELECT t.* FROM %s t, e
+             WHERE t.xmax >= ST_XMin(e.env) AND t.xmin <= ST_XMax(e.env) AND t.ymax >= ST_YMin(e.env) AND t.ymin <= ST_YMax(e.env))%s
        SELECT %s AS a%s",
       as.integer(z),
       as.integer(x),
       as.integer(y),
+      if (is.null(cells)) "f" else "f0",
       nm,
+      .rr_or(cells, ""),
       one("g3857", layer, if (is.null(points)) "" else "WHERE kind <> 'point'"),
       if (is.null(points)) {
         ""

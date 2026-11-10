@@ -31,6 +31,10 @@
     return(NULL)
   }
   e <- rlang::quo_get_expr(q)
+  # numbers in c(), such as a size's bounds, are values, not columns by position
+  if (rlang::is_call(e, "c") && length(rlang::call_args(e)) && all(vapply(rlang::call_args(e), is.numeric, logical(1)))) {
+    e <- rlang::eval_tidy(q)
+  }
   if (is.character(e) || is.numeric(e) || is.logical(e)) {
     if (is.character(e) && length(e) == 1 && e %in% cols && !.rr_is_colour(e)) {
       stop(sprintf("`%1$s = \"%2$s\"` is a value; to use the column, write it bare: `%1$s = %2$s`.", what, e), call. = FALSE)
@@ -170,8 +174,9 @@
     if (!is.null(v$value) && (!is.numeric(v$value) || v$value <= 0)) stop(sprintf("`%s` is a number of pixels.", what), call. = FALSE)
     v$value
   }
-  size <- num(a$size, "size")
+  size <- if (mark == "point") .rr_point_size(.rr_aes(a$size, ctx$cols, "size")) else num(a$size, "size")
   linewidth <- num(a$linewidth, "linewidth")
+  thin_px <- if (mark == "point") .rr_thin_px(a$thin)
 
   # text: the label's column
   lab <- if (mark == "text") {
@@ -189,6 +194,31 @@
     t <- .rr_column_type(con, ctx$src, f)
     Filter(Negate(is.null), list(field = f, label = f, format = if (t$kind == "continuous" && is.null(t$time)) "value"))
   })
+  # what a thinning keeps apart in a pixel, so that nothing the page draws or filters is lost: each colour (a number's
+  # in eight classes between its limits), each value a choose list picks, and a time panel's group by the hour
+  if (!is.null(thin_px)) {
+    bins <- unlist(lapply(seq_along(cols), function(i) {
+      cl <- colours[[i]]
+      if (cl$kind != "continuous") return(NULL)
+      v <- if (identical(cl$stretch, "log")) c(sprintf("ln(greatest(rr_c%d, %.17g))", i, cl$limits[1]), log(cl$limits))
+           else c(sprintf("rr_c%d", i), cl$limits)
+      sprintf(", least(7, greatest(0, floor((%s - %.17g) / %.17g * 8))) AS rr_k%d", v[1], as.numeric(v[2]),
+              max(as.numeric(v[3]) - as.numeric(v[2]), 1e-12), i)
+    }))
+    src <- sprintf("SELECT *%s%s FROM (%s)", paste(bins, collapse = ""),
+                   if (is.null(t_s)) "" else ", floor(rr_t / 3600) AS rr_tb", src)
+    thin <- list(
+      px = thin_px,
+      by = unique(c(
+        vapply(seq_along(cols), function(i) if (colours[[i]]$kind == "continuous") paste0("rr_k", i) else paste0("rr_c", i), ""),
+        intersect(.rr_or(s$state[["choose_fields"]], character()), ctx$cols), own$fields,
+        if (!is.null(t_s)) c(ctx$by, "rr_tb")
+      )),
+      until = a$maxzoom %||% 14
+    )
+  } else {
+    thin <- NULL
+  }
   # the rows, numbered and held for the session: a click asks the server for its row (/row/<id>/<n>), so the tiles
   # carry the number and the title, not every column, and stay small however many columns the table has
   rows_nm <- .rr_name(con, "rr_rows_")
@@ -205,9 +235,19 @@
   tiles <- if (mark == "segment") {
     rr_tiles_table(tbl, geometry = "rr_geometry", properties = props)
   } else if (!is.null(ctx$geometry)) {
-    rr_tiles_table(tbl, geometry = ctx$geometry, properties = props)
+    rr_tiles_table(tbl, geometry = ctx$geometry, properties = props, thin = thin)
   } else {
-    rr_tiles_table(tbl, lon = ctx$lon, lat = ctx$lat, properties = props)
+    rr_tiles_table(tbl, lon = ctx$lon, lat = ctx$lat, properties = props, thin = thin)
+  }
+  # a point's size: one that stays, or between two bounds from the zoom at which the points stop lying on one another
+  radius <- if (mark == "point") {
+    if (length(size) == 1) {
+      size / 2
+    } else {
+      # at the zoom found, the points lie about a pixel apart; the least size starts where they lie that far apart
+      z0 <- .rr_spread_zoom(con, sprintf("SELECT * FROM %s", rows_nm), ctx$lon, ctx$lat, ctx$geometry) + log2(size[1])
+      list("interpolate", list("exponential", 2), list("zoom"), z0, size[1] / 2, z0 + log2(size[2] / size[1]), size[2] / 2)
+    }
   }
 
   # the style
@@ -216,9 +256,9 @@
   zoomed <- function(a0, b0, c0) list("interpolate", list("linear"), list("zoom"), 3, a0, 8, b0, 13, c0)
   style <- switch(mark,
     point = list(list(id = sid, type = "circle", "source-layer" = "features",
-      paint = list("circle-color" = colour_expr, "circle-radius" = if (!is.null(size)) size / 2 else zoomed(1.5, 3, 6),
+      paint = list("circle-color" = colour_expr, "circle-radius" = radius,
                    "circle-opacity" = a$opacity %||% 0.85,
-                   "circle-stroke-color" = "rgba(255,255,255,0.7)", "circle-stroke-width" = 0.5))),
+                   "circle-stroke-color" = "rgba(255,255,255,0.7)", "circle-stroke-width" = .rr_point_stroke(radius)))),
     line = , segment = list(list(id = sid, type = "line", "source-layer" = "features",
       layout = list("line-cap" = "round", "line-join" = "round"),
       paint = list("line-color" = colour_expr, "line-width" = linewidth %||% zoomed(1, 2, 4),
@@ -273,6 +313,72 @@
   .rr_hold(.rr_quick_map(s, layer, list(con = con, name = attr(tiles, "table"))))
 }
 
+# A point's size from `size`: one number, a diameter that stays; two, the least and the most of one that follows the
+# zoom; none, 2 and 8 pixels
+.rr_point_size <- function(v) {
+  if (!is.null(v$columns)) {
+    stop("`size` by a column comes in a later version; give a number of pixels, or two, the least and the most.", call. = FALSE)
+  }
+  s <- .rr_or(v$value, c(2, 8))
+  if (!is.numeric(s) || !length(s) %in% 1:2 || anyNA(s) || any(s <= 0) || (length(s) == 2 && s[1] >= s[2])) {
+    stop("`size` is a number of pixels, or two, the least and the most, the least first.", call. = FALSE)
+  }
+  s
+}
+
+# The outline of points: none while a point is under 3 pixels across, where it would be all outline
+.rr_point_stroke <- function(radius) {
+  if (!is.list(radius)) {
+    return(if (radius < 1.5) 0 else 0.5)
+  }
+  z0 <- radius[[4]] + max(0, log2(1.5 / radius[[5]]))
+  list("interpolate", list("linear"), list("zoom"), z0, 0, z0 + 0.5, 0.5)
+}
+
+# `thin` as pixels a cell, or NULL for none
+.rr_thin_px <- function(thin) {
+  if (isTRUE(thin)) {
+    return(1)
+  }
+  if (isFALSE(thin)) {
+    return(NULL)
+  }
+  if (is.numeric(thin) && length(thin) == 1 && is.finite(thin) && thin > 0) {
+    return(thin)
+  }
+  stop("`thin` is TRUE (a point a screen pixel), FALSE (every point) or a number of pixels.", call. = FALSE)
+}
+
+# The zoom from which a layer's points stop lying on one another: the first at which their screen pixels (a tile
+# drawn 512 wide) are at least half their spots (pixels at zoom 20), by approximate counts in one pass, so that points
+# on one spot (a ship in port) count once. A point's size grows from there as a size on the ground would
+.rr_spread_zoom <- function(con, src, lon, lat, geometry) {
+  q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
+  xy <- if (is.null(geometry)) {
+    c(q(lon), q(lat))
+  } else {
+    g <- .rr_geom_sql(con, src, geometry)
+    c(sprintf("ST_X(%s)", g), sprintf("ST_Y(%s)", g))
+  }
+  zs <- 0:20
+  counts <- vapply(zs, function(z) {
+    sprintf(
+      "approx_count_distinct(CAST(floor(u * %1$.0f) AS BIGINT) * 2147483648 + CAST(floor(v * %1$.0f) AS BIGINT)) AS z%2$d",
+      2^(z + 9), z
+    )
+  }, "")
+  d <- unlist(DBI::dbGetQuery(con, sprintf(
+    "WITH p AS (SELECT (%1$s + 180) / 360 AS u, (1 - ln(tan(radians(%2$s)) + 1 / cos(radians(%2$s))) / pi()) / 2 AS v
+                FROM (%3$s) WHERE %1$s BETWEEN -180 AND 180 AND %2$s BETWEEN -85.05 AND 85.05)
+     SELECT %4$s FROM p",
+    xy[1], xy[2], src, paste(counts, collapse = ", ")
+  )))
+  if (!length(d) || anyNA(d) || d[length(d)] == 0) {
+    return(10)
+  }
+  zs[which(d >= 0.5 * d[length(d)])[1]]
+}
+
 # A layer's own `choose`: the columns it names, and their lists for the page (each value with its rows and extent,
 # and each combination's), over this layer alone
 .rr_own_choose <- function(q, ctx) {
@@ -318,9 +424,16 @@
 #'   beyond, the rest grey as "other"; viridis for an ordered factor and for numbers, dates and times. `color` is the
 #'   same.
 #' @param fill For `rr_polygon()`, the areas' colour, as `colour` is for the other marks.
-#' @param size A point's diameter, a text's size, in pixels.
+#' @param size A point's diameter, a text's size, in pixels. For points, by default, a size that follows the zoom:
+#'   the least, 2 pixels, until the zoom at which most points lie that far apart, then doubling with each zoom in, as
+#'   a size on the ground does, up to the most, 8; `size = c(1, 12)` gives other bounds, one number a size that
+#'   stays.
 #' @param linewidth A line's width (an area's outline), in pixels.
 #' @param opacity The marks' opacity, 0-1.
+#' @param thin For points: in each tile, one point for each screen pixel, `TRUE` (each colour, each value a `choose`
+#'   list picks and each group of a time panel keeping its own), so a tile of millions of rows reaches the page as
+#'   what can be seen of them; a number of pixels for coarser cells; `FALSE` keeps every point. At the layer's
+#'   deepest zoom (`maxzoom`, 14 by default) and beyond, only points that would be drawn on one spot are dropped.
 #' @param label For `rr_text()`, the column whose values are written, bare.
 #' @param palette The colours for a column, in place of the default: a palette's name (from [rr_palettes()],
 #'   `palette.pals()` or `hcl.pals()`, written loosely: `"set1"` is Set 1), colours, colours named by value
@@ -361,14 +474,14 @@
 #' }
 rr_point <- function(
   map, data = NULL, lon = NULL, lat = NULL,
-  colour = NULL, size = NULL, opacity = NULL,
+  colour = NULL, size = NULL, opacity = NULL, thin = TRUE,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
   popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
-    lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity,
+    lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity, thin = thin,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
     labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
