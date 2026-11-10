@@ -39,6 +39,8 @@
   .choose { padding: 4px 12px 6px; border-bottom: 1px solid var(--line); }
   .choose .row button { padding: 1px 7px; }
   .choose.own { padding: 0; border-bottom: 0; }
+  .choose .dual-vals { flex-wrap: wrap; gap: 0 8px; }
+  .choose .dual-vals span { white-space: nowrap; }
   .choose .chips { display: flex; flex-wrap: wrap; gap: 1px 10px; margin: -2px 0 4px 80px; }
   .choose .chips label { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
   .row label { width: 74px; color: var(--muted); }
@@ -857,9 +859,18 @@ SETS.forEach((S, k) => {
 const chId = (S, i) => `ch-${S.k}-${i}`;
 function chooseHtml(S) {
   return S.fields.map((f, i) => {
-    const head = `<div class="row"><label for="${chId(S, i)}" data-t="${esc(f.label ?? f.field)}"></label>` +
+    const head = `<div class="row"><label for="${chId(S, i)}${f.range ? "-lo" : ""}" data-t="${esc(f.label ?? f.field)}"></label>` +
       `<button data-step="-1" data-set="${S.k}" data-ch="${i}" data-tt="chooseBack">‹</button>`;
     const next = `<button data-step="1" data-set="${S.k}" data-ch="${i}" data-tt="chooseNext">›</button>`;
+    // a number, a date or a time: two handles over its bins, the span and its rows beneath
+    if (f.range) {
+      const k = f.bins.length - 1, id = chId(S, i);
+      return head + `<button data-all="${i}" data-set="${S.k}" data-t="chooseAll" data-tt="chooseAllTip"></button>` + next + "</div>" +
+        `<div class="row range" id="${id}"><label></label><div class="dual"><i class="span"></i>` +
+        `<input id="${id}-lo" type="range" min="0" max="${k}" step="1" value="0">` +
+        `<input id="${id}-hi" type="range" min="0" max="${k}" step="1" value="${k}"></div></div>` +
+        `<div class="dual-vals"><span id="${id}-text"></span><span id="${id}-n"></span></div>`;
+    }
     if (f.multi) {
       return head + `<button data-all="${i}" data-set="${S.k}" data-t="chooseAll" data-tt="chooseAllTip"></button>` + next + "</div>" +
         `<div class="chips" id="${chId(S, i)}">` + f.options.map(o => `<label><input type="checkbox" value="${esc(o.value)}" checked>` +
@@ -927,14 +938,53 @@ if (MAPSET) {
 // the values chosen of a set's field, null where every value is shown
 function chosen(S, i) {
   const f = S.fields[i], el = $(chId(S, i));
+  if (f.range) {
+    // a range's bins from the one handle to the other, as text (the combinations' keys); none where it spans them all
+    const lo = $(el.id + "-lo"), hi = $(el.id + "-hi"), a = +lo.value, b = +hi.value;
+    if (a <= +lo.min && b >= +hi.max) return null;
+    return Array.from({ length: b - a + 1 }, (_, j) => String(a + j));
+  }
   if (!f.multi) return el.value === "" ? null : [el.value];
   const on = [...el.querySelectorAll("input")].filter(x => x.checked).map(x => x.value);
   return on.length === f.options.length ? null : on;
 }
 function setChosen(S, i, vals) {
   const f = S.fields[i], el = $(chId(S, i));
+  if (f.range) {
+    const lo = $(el.id + "-lo"), hi = $(el.id + "-hi"), v = (vals ?? []).map(Number);
+    lo.value = vals === null ? lo.min : Math.min(...v);
+    hi.value = vals === null ? hi.max : Math.max(...v);
+    rangeShow(S, i);
+    return;
+  }
   if (!f.multi) { el.value = vals?.[0] ?? ""; return; }
   for (const x of el.querySelectorAll("input")) x.checked = vals === null || vals.includes(x.value);
+}
+// a range's handles drawn, its span written (a number in the page's language, a time to the minute) and the rows in it
+// that the other fields' choices leave
+const rangeEnd = (f, j, end) => {
+  const v = end ? f.bins[j].to : f.bins[j].from;
+  // a time to the minute, or to the day where every bin starts and ends at midnight
+  f.daily ??= f.bins.every(x => /00:00:00$/.test(x.from) && /00:00:00$/.test(x.to));
+  return f.range === "number" ? (+v).toLocaleString(loc()) : f.range === "time" ? v.slice(0, f.daily ? 10 : 16) : v;
+};
+function rangeShow(S, i) {
+  const f = S.fields[i], id = chId(S, i), a = +$(id + "-lo").value, b = +$(id + "-hi").value;
+  S.draw[i]?.();
+  $(id + "-text").textContent = f.closed && a === b ? rangeEnd(f, a, false) : `${rangeEnd(f, a, false)} – ${rangeEnd(f, b, true)}`;
+  const count = offered(S, i, S.fields.map((g, j) => chosen(S, j)));
+  let n = 0;
+  for (let j = a; j <= b; j++) n += count ? count.get(String(j)) ?? 0 : f.bins[j].n ?? 0;
+  $(id + "-n").textContent = `(${n.toLocaleString(loc())})`;
+}
+for (const S of SETS) {
+  S.draw = {};
+  S.fields.forEach((f, i) => {
+    if (!f.range) return;
+    S.draw[i] = dualTrack($(chId(S, i) + "-lo"), $(chId(S, i) + "-hi"));
+    $(chId(S, i)).addEventListener("input", () => rangeShow(S, i));
+    rangeShow(S, i);
+  });
 }
 // the time panel's group from the start, so the sidebar does not move when the map has loaded and the panel is set up;
 // its spans named as the map names them (a trip, a voyage), and no list where every vessel has only its whole series
@@ -1185,6 +1235,17 @@ Promise.all([BUNDLE ? BUNDLE.meta : fetch("/meta").then(r => r.json()), styleLoa
   for (const l of OTHER) if (l.contours?.fit && ["0", "1"].includes(q.get(l.id + "_auto"))) $(`${l.id}-kauto`).checked = q.get(l.id + "_auto") === "1";
   for (const S of SETS) {
     S.fields.forEach((f, i) => {
+      if (f.range) {
+        // a range as its first bin's start and its last bin's end, `2010..2018`: the bins from the first that starts at or
+        // after the one to the last that ends at or before the other (a number compared as a number, a date or a time as
+        // its text)
+        const [a, b] = (q.get(S.key + f.field) ?? "").split("..");
+        if (a === undefined || b === undefined) return;
+        const le = (x, y) => f.range === "number" ? +x <= +y : x <= y;
+        const j0 = f.bins.findIndex(x => le(a, x.from)), j1 = f.bins.findLastIndex(x => le(x.to, b));
+        if (j0 >= 0 && j1 >= j0) setChosen(S, i, Array.from({ length: j1 - j0 + 1 }, (_, j) => String(j0 + j)));
+        return;
+      }
       const vals = (q.get(S.key + f.field) ?? "").split(",").filter(v => f.options.some(o => o.value === v));
       if (vals.length) setChosen(S, i, f.multi ? vals : vals.slice(0, 1));
     });
@@ -1252,7 +1313,10 @@ function addressNow() {
     put(`${l.id}_cut`, String(v.cut), String(d.cut)); put(`${l.id}_cop`, String(v.op), String(d.op));
   }
   for (const l of OTHER) if (l.contours?.fit) put(`${l.id}_auto`, contourFollowing(l) ? "1" : "0", l.contours.auto === false ? "0" : "1");
-  for (const S of SETS) S.fields.forEach((f, i) => put(S.key + f.field, chosen(S, i)?.join(",") ?? "", ""));
+  for (const S of SETS) S.fields.forEach((f, i) => {
+    const v = chosen(S, i);
+    put(S.key + f.field, v === null ? "" : f.range ? `${f.bins[+v[0]].from}..${f.bins[+v[v.length - 1]].to}` : v.join(","), "");
+  });
   if (TP && TS) {
     const v = tVes(), t = TS.t;
     put("tv", v.value, TP.vessels[0].value);
@@ -1407,6 +1471,12 @@ function choiceFilter(l, st) {
     if (S.layer === null ? !(f.layers ?? []).includes(l.id) : S.layer !== l.id) return [];
     const vals = chosen(S, i);
     if (vals === null) return [];
+    if (f.range) {
+      // from the first bin's start to the last's end, which is in it where the bins are values, or the last of all
+      const a = +vals[0], b = +vals[vals.length - 1];
+      const g = [f.range === "number" ? "to-number" : "to-string", ["get", f.field]];
+      return [["all", ["has", f.field], [">=", g, f.bins[a].lo], [f.closed || b === f.bins.length - 1 ? "<=" : "<", g, f.bins[b].hi]]];
+    }
     const os = f.options.filter(o => vals.includes(o.value));
     const cond = ["in", ["get", f.field], ["literal", os.filter(o => o.match !== null).map(o => o.match)]];
     return [os.some(o => o.match === null) ? ["any", ["!", ["has", f.field]], cond] : cond];
@@ -1431,17 +1501,15 @@ function applyChoice(l) {
 // the view fitted to the choice: the combination's extent where every field has one value chosen, else the extent of
 // the values chosen of the field just changed
 function zoomToChoice(S, i) {
+  if (S.fields[i].range) return;   // a range slid is not followed: the view stays
   const sets = S.fields.map((f, j) => chosen(S, j));
   if (sets.every(v => v === null)) return;
-  let box = S.fields.length > 1 && sets.every(v => v !== null && v.length === 1)
-    ? S.extents.find(e => e.key === sets.map(v => v[0]).join("\u001f"))?.bbox : null;
-  if (!box) {
-    const j = sets[i] !== null ? i : sets.findIndex(v => v !== null);
-    const bs = S.fields[j].options.filter(o => sets[j].includes(o.value) && o.bbox).map(o => o.bbox);
-    if (bs.length) box = [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])),
-                          Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
-  }
-  if (box) map.fitBounds([[box[0], box[1]], [box[2], box[3]]], { padding: 40, maxZoom: 14 });
+  // the extent of the combinations that every choice leaves, else of the values chosen of the field just changed
+  let bs = S.combos.length ? S.extents.filter((e, n) => e.bbox && sets.every((s, j) => s === null || s.includes(S.combos[n].vals[j]))).map(e => e.bbox) : [];
+  if (!bs.length && sets[i] !== null) bs = S.fields[i].options.filter(o => sets[i].includes(o.value) && o.bbox).map(o => o.bbox);
+  if (!bs.length) return;
+  const box = [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])), Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
+  map.fitBounds([[box[0], box[1]], [box[2], box[3]]], { padding: 40, maxZoom: 14 });
 }
 // A set's lists linked: each offers only the values the other lists' choices leave, from the combinations the data
 // hold (`extents`), its counts the rows left. So a list of trips after a list of vessels holds the chosen vessel's
@@ -1467,6 +1535,17 @@ function linkChoices(S, changed) {
   const sets = S.fields.map((f, j) => chosen(S, j));
   S.fields.forEach((f, i) => {
     const count = offered(S, i, sets), el = $(chId(S, i));
+    // a range spans the bins the others leave: all of them where it spanned all
+    if (f.range) {
+      const lo = $(el.id + "-lo"), hi = $(el.id + "-hi");
+      const have = [...count.keys()].map(Number).filter(Number.isFinite);
+      const mn = have.length ? Math.min(...have) : 0, mx = have.length ? Math.max(...have) : f.bins.length - 1;
+      for (const x of [lo, hi]) { x.min = mn; x.max = mx; }
+      if (sets[i] === null) { lo.value = mn; hi.value = mx; }
+      else { lo.value = Math.max(mn, Math.min(+lo.value, mx)); hi.value = Math.max(+lo.value, Math.min(+hi.value, mx)); }
+      rangeShow(S, i);
+      return;
+    }
     const text = o => `${o.text} (${count.get(o.value).toLocaleString(loc())})`;
     for (const o of f.options) {
       const on = count.has(o.value);
@@ -1494,6 +1573,30 @@ for (const S of SETS) S.fields.forEach((f, i) => $(chId(S, i)).addEventListener(
 // ‹ and › show one value: the next or previous of the one shown, else the first or the last; all shows every value
 for (const b of document.querySelectorAll("[data-step]")) b.addEventListener("click", () => {
   const S = SETS[+b.dataset.set], i = +b.dataset.ch, f = S.fields[i], cur = chosen(S, i);
+  if (f.range) {
+    const lo = $(chId(S, i) + "-lo"), hi = $(chId(S, i) + "-hi"), step = +b.dataset.step;
+    const count = offered(S, i, S.fields.map((g, j) => chosen(S, j)));
+    const have = f.bins.map((x, j) => j).filter(j => count ? count.has(String(j)) : (f.bins[j].n ?? 0) > 0);
+    if (!have.length) return;
+    let a, z;
+    if (cur === null || +lo.value === +hi.value) {
+      // one bin at a time, over the bins that hold rows
+      const at = cur === null ? -1 : have.indexOf(+lo.value);
+      a = z = have[at < 0 ? (step > 0 ? 0 : have.length - 1) : (at + step + have.length) % have.length];
+    } else {
+      // a window moved by its width, back to the start past the end
+      const w = +hi.value - +lo.value + 1, mn = +lo.min, mx = +lo.max;
+      a = +lo.value + step * w;
+      if (a > mx) a = mn;
+      if (a + w - 1 < mn) a = Math.max(mn, mx - w + 1);
+      a = Math.max(mn, a);
+      z = Math.min(mx, a + w - 1);
+    }
+    setChosen(S, i, Array.from({ length: z - a + 1 }, (_, j) => String(a + j)));
+    onChoice(S, i);
+    writeAddress();
+    return;
+  }
   // the values the other lists leave, in order
   const count = offered(S, i, S.fields.map((g, j) => chosen(S, j))), opts = count ? f.options.filter(o => count.has(o.value)) : f.options;
   const n = opts.length;

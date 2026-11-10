@@ -1,3 +1,13 @@
+# rebelrebel 2026.11.10.7
+
+* `choose` takes ranges: a number, a date or a time is a slider with two handles, over each of its values where it has
+  at most 64 (years, days), else over bins between `pretty()` breaks; text, a factor or a logical stays a list, as
+  colour reads them. Ranges and lists are linked by the same counts (a vessel chosen, the days' range spans its
+  days), ‹ and › step one value at a time over the values with rows or move the window by its width, and the address
+  holds `day=2019-03-01..2019-03-03`. A numeric id is a list once it is text: `as.character(as.integer(id))`.
+* A path is split by a range's bins, so a range chosen shows whole runs of it; the view fits the combinations every
+  choice leaves, and stays where it is when a range is slid.
+
 # rebelrebel 2026.11.10.6
 
 * Points are thinned in each tile by default (`rr_point(thin = TRUE)`): one a screen pixel, each colour (a number's in

@@ -379,6 +379,24 @@
   zs[which(d >= 0.5 * d[length(d)])[1]]
 }
 
+# A range's bin start for each row, in SQL: the value itself where each value is a bin, else the start of the bin it
+# falls in (a number as a number, a date or a time as the text the tiles carry, compared as text as the page does)
+.rr_range_start_sql <- function(con, f) {
+  col <- as.character(DBI::dbQuoteIdentifier(con, f$field))
+  if (isTRUE(f$closed)) {
+    return(col)
+  }
+  lit <- function(v) if (is.numeric(v)) sprintf("%.17g", v) else as.character(DBI::dbQuoteString(con, v))
+  x <- if (f$range == "number") sprintf("CAST(%s AS DOUBLE)", col) else sprintf("CAST(%s AS VARCHAR)", col)
+  k <- length(f$bins)
+  whens <- if (k > 1) {
+    paste(vapply(seq_len(k - 1), function(j) {
+      sprintf("WHEN %s < %s THEN %s", x, lit(f$bins[[j]]$hi), lit(f$bins[[j]]$lo))
+    }, ""), collapse = " ")
+  } else ""
+  sprintf("CASE WHEN %s IS NULL THEN NULL %s ELSE %s END", col, whens, lit(f$bins[[k]]$lo))
+}
+
 # A layer's own `choose`: the columns it names, and their lists for the page (each value with its rows and extent,
 # and each combination's), over this layer alone
 .rr_own_choose <- function(q, ctx) {
@@ -451,10 +469,11 @@
 #' @param codes The labels of a coded column's values, shown beside each code: a named list by column, each a named
 #'   vector (`c("6" = "bottom trawl")`) or a table of code and label; by default the dictionary's, where it has them.
 #' @param hover A column whose value is shown beside the pointer.
-#' @param choose The columns, written bare, whose values the reader picks to show of this layer alone, a list each
-#'   under the layer's name: chips for a column of up to 12 values, else a list to show one at a time, with ‹ and ›
-#'   to step. Several lists are linked: each offers only the values the others leave. For lists that drive every
-#'   layer with the column, give `choose` to [rr_map()].
+#' @param choose The columns, written bare, whose values the reader picks to show of this layer alone, each under
+#'   the layer's name: text, a factor or a logical as a list (chips for up to 12 values, else a list to show one at a
+#'   time), a number, a date or a time as a range with two handles; ‹ and › step through either. Several are linked:
+#'   each offers only the values the others leave. For choices that drive every layer with the column, give `choose`
+#'   to [rr_map()].
 #' @param name,info The layer's name in the sidebar and the text behind its ⓘ.
 #' @param section The sidebar's box the layer sits in, by its title.
 #' @param visible Whether the layer is on when the page opens.
@@ -666,8 +685,24 @@ rr_path <- function(
   gap <- .rr_gap_sql(max_gap_s)
   t_s <- .rr_time_s_sql(con, ctx$src, ctx$time)
   .rr_extension(con, "spatial")
+  # a range chosen (a number, a date or a time) splits the lines by its bins, not its values: each run carries its bin's
+  # start under the column's name, which the page's range compares
+  ranged <- Filter(function(f) !is.null(f$range) && f$field %in% keys, c(s$state[["choose"]]$fields, own$config$fields))
+  ranged <- ranged[!duplicated(vapply(ranged, `[[`, "", "field"))]
+  bin_nm <- function(f) paste0("rr_k_", f$field)
+  run_src <- if (length(ranged)) {
+    sprintf("SELECT *, %s FROM (%s)", paste(vapply(ranged, function(f) {
+      sprintf("%s AS %s", .rr_range_start_sql(con, f), q(bin_nm(f)))
+    }, ""), collapse = ", "), ctx$src)
+  } else {
+    ctx$src
+  }
+  run_keys <- vapply(keys, function(k) {
+    f <- Filter(function(f) f$field == k, ranged)
+    if (length(f)) bin_nm(f[[1]]) else k
+  }, "", USE.NAMES = FALSE)
   lines_src <- .rr_runs_sql(
-    con, ctx$src, ctx$lon, ctx$lat, ctx$time, keys,
+    con, run_src, ctx$lon, ctx$lat, ctx$time, run_keys,
     values = if (length(cc)) {
       if (type$kind == "discrete") sprintf("CAST(%s AS VARCHAR)", q(cc))
       else if (!is.null(type$time)) sprintf("epoch(%s)", q(cc))
@@ -675,6 +710,12 @@ rr_path <- function(
     },
     names = "rr_c1", count = "rows", t_names = c("rr_t0", "rr_t1"), gap = gap, t_s = t_s
   )
+  if (length(ranged)) {
+    lines_src <- sprintf("SELECT * EXCLUDE (%s), %s FROM (%s)",
+      paste(vapply(ranged, function(f) q(bin_nm(f)), ""), collapse = ", "),
+      paste(vapply(ranged, function(f) sprintf("%s AS %s", q(bin_nm(f)), q(f$field)), ""), collapse = ", "),
+      lines_src)
+  }
   colours <- if (length(cc)) .rr_colour_by(con, lines_src, "rr_c1", "rr_c1", palette, limits, stretch, type)
   fixed <- if (is.null(col)) .rr_okabe_ito[1] else if (!is.null(col$value)) .rr_hex(col$value)
   hov <- .rr_select(rlang::enquo(hover), keys, "hover")

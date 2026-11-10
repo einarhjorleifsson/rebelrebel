@@ -144,7 +144,8 @@ test_that("rr_map(data, choose = ) names the columns the reader picks", {
 
 test_that("two lists are linked by the combinations the data hold, with their rows", {
   skip_if_no_spatial()
-  x <- rr_example("trawlsurvey") |> dplyr::mutate(day = as.character(as.Date(time)))
+  # text is a list; a number would be a range (an id cast to whole first: DuckDB writes the double 1131 as 1131.0)
+  x <- rr_example("trawlsurvey") |> dplyr::mutate(vid = as.character(as.integer(vid)), day = as.character(as.Date(time)))
   ch <- (rr_map(x, choose = c(vid, day)) |> rr_point())$config$choose
   rows <- dplyr::pull(dplyr::count(x), n)
   # each option's value alone, for the page's counts as the lists narrow
@@ -157,6 +158,42 @@ test_that("two lists are linked by the combinations the data hold, with their ro
   truth <- dplyr::collect(dplyr::distinct(dplyr::filter(x, vid == 1131), day))$day
   mine <- sub("^1131\u001f", "", grep("^1131\u001f", keys, value = TRUE))
   expect_setequal(mine, truth)
+})
+
+test_that("a number, a date or a time is a range of bins, linked as the lists are", {
+  skip_if_no_spatial()
+  x <- rr_example("trawlsurvey") |> dplyr::mutate(vid = as.character(vid), day = as.Date(time))
+  rows <- dplyr::pull(dplyr::count(x), n)
+  ch <- (rr_map(x, choose = c(vid, day, speed, time)) |> rr_point())$config$choose
+  f <- stats::setNames(ch$fields, vapply(ch$fields, `[[`, "", "field"))
+  expect_null(f$vid$range)
+  expect_equal(c(f$day$range, f$speed$range, f$time$range), c("date", "number", "time"))
+  # 22 days, each a bin of its own; speed and time in bins between pretty breaks, end to end
+  expect_true(f$day$closed)
+  expect_length(f$day$bins, 22)
+  expect_equal(f$day$bins[[1]]$lo, "2019-02-27")
+  expect_false(f$speed$closed)
+  lo <- vapply(f$speed$bins, `[[`, 0, "lo")
+  hi <- vapply(f$speed$bins, `[[`, 0, "hi")
+  expect_equal(lo[-1], hi[-length(hi)])
+  sp <- dplyr::collect(dplyr::select(x, speed))$speed
+  expect_true(lo[1] <= min(sp) && hi[length(hi)] >= max(sp))
+  # each bin's rows are the rows its ends take, the last bin closed
+  n <- vapply(f$speed$bins, `[[`, 0, "n")
+  took <- vapply(seq_along(lo), function(j) sum(sp >= lo[j] & (if (j == length(lo)) sp <= hi[j] else sp < hi[j])), 0)
+  expect_equal(n, took)
+  for (g in f[c("day", "speed", "time")]) expect_equal(sum(vapply(g$bins, `[[`, 0, "n")), rows)
+  # the combinations carry a range by its bin
+  parts <- strsplit(ch$extents[[1]]$key, "\u001f")[[1]]
+  expect_length(parts, 4)
+  expect_match(parts[2:4], "^[0-9]+$")
+  expect_equal(sum(vapply(ch$extents, `[[`, 0, "n")), rows)
+  # a path is split by a range's bins, each run carrying its bin's start, which the page's range compares
+  m <- rr_map(x, choose = c(vid, speed)) |> rr_path(group = vid, time = time)
+  tb <- attr(m, "tables")[[1]]
+  starts <- DBI::dbGetQuery(tb$con, sprintf("SELECT DISTINCT speed FROM %s", tb$name))$speed
+  expect_true(all(starts %in% lo))
+  expect_gt(length(starts), 10)
 })
 
 test_that("a layer's own choose: its lists, over it alone", {
@@ -172,10 +209,14 @@ test_that("a layer's own choose: its lists, over it alone", {
   # the paths are split by the chosen day, so a day shows whole lines of it
   tb <- attr(m, "tables")[[1]]
   expect_true("day" %in% DBI::dbListFields(tb$con, tb$name))
-  # shapes: each value's extent from its shapes
-  o <- (rr_example("trawlsurveytows") |> rr_line(choose = id.lgs))$config$layers[[1]]$choose$fields[[1]]$options
+  # shapes: each value's extent from its shapes, a list's and a range's
+  tows <- rr_example("trawlsurveytows") |> dplyr::mutate(tow = as.character(as.integer(id.lgs)))
+  o <- (tows |> rr_line(choose = tow))$config$layers[[1]]$choose$fields[[1]]$options
   expect_length(o, 581)
   expect_true(all(lengths(lapply(o, `[[`, "bbox")) == 4))
+  r <- (tows |> rr_line(choose = id.lgs))$config$layers[[1]]$choose$fields[[1]]
+  expect_equal(r$range, "number")
+  expect_true(all(lengths(lapply(Filter(function(b) b$n > 0, r$bins), `[[`, "bbox")) == 4))
   expect_error(rr_point(x, choose = nope), "No column nope")
 })
 

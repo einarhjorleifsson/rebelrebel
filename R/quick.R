@@ -91,53 +91,108 @@
   list(state = state, ctx_layer = ctx)
 }
 
-# The values of each field to choose by, with the rows' count and extent of each, and the extent of each combination
-# that occurs where there are several fields. A number or a logical is matched as it is, any other type as the text
-# the tiles carry it as
+# The values of each field to choose by, each with its rows' count and extent: a list's values (text, a factor or a
+# logical), or a range's bins (a number, a date or a time): each value where there are at most 64, else the bins
+# between pretty() breaks. Where there are several fields, each combination that occurs (a range's by its bin) with its
+# rows and extent, by which the page links the fields and fits the view. A logical is matched as it is, text and
+# factors as the text the tiles carry; a range's ends are numbers, or for a date or a time the text the tiles carry
 .rr_quick_choose <- function(ctx, fields) {
   if (!length(fields)) {
     return(NULL)
   }
-  q <- function(v) as.character(DBI::dbQuoteIdentifier(ctx$con, v))
-  as_is <- vapply(
-    fields,
-    function(f) {
-      v <- dplyr::collect(utils::head(
-        dplyr::select(ctx$x, dplyr::all_of(f)),
-        1
-      ))[[1]]
-      is.numeric(v) || is.logical(v)
-    },
-    logical(1)
-  )
-  value_sql <- function(i) {
-    if (as_is[i]) q(fields[i]) else sprintf("CAST(%s AS VARCHAR)", q(fields[i]))
-  }
-  b <- .rr_box_sql(ctx$con, ctx$src, ctx$lon, ctx$lat, ctx$geometry)
-  box_sql <- b$select
-  where <- b$where
-  key <- function(v, i) {
-    if (is.na(v)) {
-      "<NA>"
-    } else if (is.numeric(v)) {
-      format(v, scientific = FALSE, trim = TRUE, digits = 15)
-    } else {
-      as.character(v)
-    }
-  }
+  con <- ctx$con
+  q <- function(v) as.character(DBI::dbQuoteIdentifier(con, v))
+  kind <- vapply(fields, function(f) {
+    v <- dplyr::collect(utils::head(dplyr::select(ctx$x, dplyr::all_of(f)), 1))[[1]]
+    if (inherits(v, "POSIXct")) "time" else if (inherits(v, "Date")) "date" else if (is.numeric(v)) "number"
+    else if (is.logical(v)) "logical" else "text"
+  }, "", USE.NAMES = FALSE)
+  b <- .rr_box_sql(con, ctx$src, ctx$lon, ctx$lat, ctx$geometry)
   box <- function(r, j) c(r$lon0[j], r$lat0[j], r$lon1[j], r$lat1[j])
-  out <- list(
-    fields = lapply(seq_along(fields), function(i) {
-      r <- DBI::dbGetQuery(
-        ctx$con,
-        sprintf(
-          "SELECT %s AS v, %s FROM (%s) WHERE %s GROUP BY 1 ORDER BY v NULLS LAST",
-          value_sql(i),
-          box_sql,
-          ctx$src,
-          where
+  num <- function(x) format(x, scientific = FALSE, trim = TRUE, digits = 15)
+  key <- function(v) if (is.na(v)) "<NA>" else if (is.numeric(v)) num(v) else as.character(v)
+  # a range's values on one scale: a number, or a date's or a time's seconds since 1970
+  x_sql <- function(i) if (kind[i] == "number") sprintf("CAST(%s AS DOUBLE)", q(fields[i])) else sprintf("epoch(%s)", q(fields[i]))
+  ranges <- lapply(seq_along(fields), function(i) {
+    if (!kind[i] %in% c("number", "date", "time")) {
+      return(NULL)
+    }
+    x <- x_sql(i)
+    st <- DBI::dbGetQuery(con, sprintf(
+      "SELECT count(DISTINCT %1$s) AS d, min(%1$s) AS lo, max(%1$s) AS hi FROM (%2$s) WHERE %3$s AND %1$s IS NOT NULL",
+      x, ctx$src, b$where
+    ))
+    if (st$d == 0) {
+      return(NULL) # no value: a list, of none
+    }
+    if (st$d <= 64) {
+      # each value a bin, its ends the value: as the tiles carry it (a date's or a time's own text)
+      v <- DBI::dbGetQuery(con, sprintf(
+        "SELECT %1$s AS x, any_value(CAST(%2$s AS VARCHAR)) AS t FROM (%3$s) WHERE %4$s AND %1$s IS NOT NULL GROUP BY 1 ORDER BY 1",
+        x, q(fields[i]), ctx$src, b$where
+      ))
+      ends <- if (kind[i] == "number") as.list(v$x) else as.list(v$t)
+      text <- if (kind[i] == "number") vapply(v$x, num, "") else v$t
+      list(
+        closed = TRUE, lo = ends, hi = ends, from = text, to = text,
+        sql = sprintf("CAST(list_position([%s]::DOUBLE[], %s) - 1 AS INTEGER)", paste(sprintf("%.17g", v$x), collapse = ", "), x)
+      )
+    } else {
+      at <- switch(kind[i],
+        number = pretty(c(st$lo, st$hi), n = 30),
+        date = as.numeric(pretty(as.Date(c(st$lo, st$hi) / 86400, origin = "1970-01-01"), n = 30)) * 86400,
+        time = as.numeric(pretty(as.POSIXct(c(st$lo, st$hi), origin = "1970-01-01", tz = "UTC"), n = 30))
+      )
+      at <- unique(c(min(at[1], st$lo), at[at > st$lo & at < st$hi], max(at[length(at)], st$hi)))
+      k <- length(at) - 1
+      text <- switch(kind[i],
+        number = vapply(at, num, ""),
+        date = format(as.Date(at / 86400, origin = "1970-01-01")),
+        time = format(as.POSIXct(at, origin = "1970-01-01", tz = "UTC"), "%Y-%m-%d %H:%M:%S")
+      )
+      ends <- if (kind[i] == "number") as.list(at) else as.list(text)
+      list(
+        closed = FALSE, lo = ends[-(k + 1)], hi = ends[-1], from = text[-(k + 1)], to = text[-1],
+        sql = if (k == 1) "0" else sprintf(
+          "CASE %s ELSE %d END",
+          paste(sprintf("WHEN %s < %.17g THEN %d", x, at[2:k], 0:(k - 2)), collapse = " "), k - 1
         )
       )
+    }
+  })
+  is_range <- !vapply(ranges, is.null, logical(1))
+  value_sql <- function(i) {
+    if (is_range[i]) {
+      sprintf("CASE WHEN %s IS NULL THEN NULL ELSE %s END", q(fields[i]), ranges[[i]]$sql)
+    } else if (kind[i] == "logical") {
+      q(fields[i])
+    } else {
+      sprintf("CAST(%s AS VARCHAR)", q(fields[i]))
+    }
+  }
+  out <- list(
+    fields = lapply(seq_along(fields), function(i) {
+      r <- DBI::dbGetQuery(con, sprintf(
+        "SELECT %s AS v, %s FROM (%s) WHERE %s GROUP BY 1 ORDER BY v NULLS LAST",
+        value_sql(i), b$select, ctx$src, b$where
+      ))
+      if (is_range[i]) {
+        rg <- ranges[[i]]
+        k <- length(rg$lo)
+        return(list(
+          field = fields[i],
+          label = fields[i],
+          range = kind[i],
+          closed = rg$closed, # each bin's ends both in it; else each from its start to before its end, the last whole
+          bins = lapply(seq_len(k), function(j) {
+            at <- match(j - 1, r$v)
+            Filter(Negate(is.null), list(
+              lo = rg$lo[[j]], hi = rg$hi[[j]], from = rg$from[j], to = rg$to[j],
+              n = if (is.na(at)) 0 else r$n[at], bbox = if (!is.na(at)) box(r, at)
+            ))
+          })
+        ))
+      }
       list(
         field = fields[i],
         label = fields[i],
@@ -145,13 +200,9 @@
         options = lapply(seq_len(nrow(r)), function(j) {
           v <- r$v[j]
           list(
-            value = key(v, i),
-            text = if (is.na(v)) "none" else key(v, i), # the value alone, for the page's counts as the lists narrow
-            label = sprintf(
-              "%s (%s)",
-              if (is.na(v)) "none" else key(v, i),
-              format(r$n[j], big.mark = ",", trim = TRUE)
-            ),
+            value = key(v),
+            text = if (is.na(v)) "none" else key(v), # the value alone, for the page's counts as the lists narrow
+            label = sprintf("%s (%s)", if (is.na(v)) "none" else key(v), format(r$n[j], big.mark = ",", trim = TRUE)),
             match = if (is.na(v)) NULL else v,
             bbox = box(r, j)
           )
@@ -160,33 +211,14 @@
     })
   )
   if (length(fields) > 1) {
-    r <- DBI::dbGetQuery(
-      ctx$con,
-      sprintf(
-        "SELECT %s, %s FROM (%s) WHERE %s GROUP BY ALL",
-        paste(
-          vapply(
-            seq_along(fields),
-            function(i) sprintf("%s AS v%d", value_sql(i), i),
-            ""
-          ),
-          collapse = ", "
-        ),
-        box_sql,
-        ctx$src,
-        where
-      )
-    )
+    r <- DBI::dbGetQuery(con, sprintf(
+      "SELECT %s, %s FROM (%s) WHERE %s GROUP BY ALL",
+      paste(vapply(seq_along(fields), function(i) sprintf("%s AS v%d", value_sql(i), i), ""), collapse = ", "),
+      b$select, ctx$src, b$where
+    ))
     out$extents <- lapply(seq_len(nrow(r)), function(j) {
       list(
-        key = paste(
-          vapply(
-            seq_along(fields),
-            function(i) key(r[[paste0("v", i)]][j], i),
-            ""
-          ),
-          collapse = intToUtf8(31)
-        ),
+        key = paste(vapply(seq_along(fields), function(i) key(r[[paste0("v", i)]][j]), ""), collapse = intToUtf8(31)),
         n = r$n[j], # the rows of the combination, for the linked lists' counts
         bbox = box(r, j)
       )

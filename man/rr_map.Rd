@@ -46,12 +46,17 @@ above the groups, with buttons that step through the values): a list with \code{
 \code{multi} (\code{TRUE}: each value a chip ticked on and off, so several show at once; else a list, "all" first, to show
 one at a time), its \code{options} (each a \code{value} for the control and the address, a \code{label}, \code{match}, the value the
 layers' features carry, \code{NULL} for none, and optionally \code{bbox}, the extent the view is fitted to) and \code{layers}
-(the ids it filters); and optionally \code{extents}, each a \code{key} (the values of every field joined by the character 31)
-and a \code{bbox}, for the view where every field has one value chosen. \code{\link[=rr_map]{rr_map()}} makes it from
-the columns its \code{choose} names. A choice goes into the address under the field's name, several values separated by
-commas, and nothing is fetched again.
-For a map started from data, its columns written bare, \code{choose = c(id, leg)}: a list each above the layers, made
-from the data.}
+(the ids it filters); or, for a range, \code{range} (\code{"number"}, \code{"date"} or \code{"time"}), \code{closed} and its \code{bins}
+(each a \code{lo} and a \code{hi} as the features carry them, \code{from} and \code{to} as written, \code{n} and optionally \code{bbox}); and
+optionally \code{extents}, each a \code{key} (each field's value, or a range's bin from 0, joined by the character 31), \code{n}
+and a \code{bbox}, by which the fields are linked and the view fitted. \code{\link[=rr_map]{rr_map()}} makes it from the columns its
+\code{choose} names. A choice goes into the address under the field's name, several values separated by commas, a
+range as \code{from..to}, and nothing is fetched again.
+For a map started from data, its columns written bare, \code{choose = c(id, year)}, made from the data and linked:
+text, a factor or a logical is a list of its values (chips for up to 12); a number, a date or a time is a range
+with two handles, over each of its values where it has at most 64, else over bins between \code{pretty()} breaks. A
+numeric id is a list once it is text: \code{mutate(id = as.character(as.integer(id)))} (DuckDB writes a double's text
+with a decimal, \code{1131.0}). A path is split by a range's bins, so a choice shows whole runs.}
 
 \item{sections}{For a map started from data, the sidebar's boxes the layers name (their \code{section}), each a \code{title}
 and whether it is \code{open}: \code{list(Reference = list(open = FALSE))}.}

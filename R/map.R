@@ -634,12 +634,17 @@ rr_section <- function(id, title = id, layers, open = TRUE) {
 #'   `multi` (`TRUE`: each value a chip ticked on and off, so several show at once; else a list, "all" first, to show
 #'   one at a time), its `options` (each a `value` for the control and the address, a `label`, `match`, the value the
 #'   layers' features carry, `NULL` for none, and optionally `bbox`, the extent the view is fitted to) and `layers`
-#'   (the ids it filters); and optionally `extents`, each a `key` (the values of every field joined by the character 31)
-#'   and a `bbox`, for the view where every field has one value chosen. [rr_map()] makes it from
-#'   the columns its `choose` names. A choice goes into the address under the field's name, several values separated by
-#'   commas, and nothing is fetched again.
-#'   For a map started from data, its columns written bare, `choose = c(id, leg)`: a list each above the layers, made
-#'   from the data.
+#'   (the ids it filters); or, for a range, `range` (`"number"`, `"date"` or `"time"`), `closed` and its `bins`
+#'   (each a `lo` and a `hi` as the features carry them, `from` and `to` as written, `n` and optionally `bbox`); and
+#'   optionally `extents`, each a `key` (each field's value, or a range's bin from 0, joined by the character 31), `n`
+#'   and a `bbox`, by which the fields are linked and the view fitted. [rr_map()] makes it from the columns its
+#'   `choose` names. A choice goes into the address under the field's name, several values separated by commas, a
+#'   range as `from..to`, and nothing is fetched again.
+#'   For a map started from data, its columns written bare, `choose = c(id, year)`, made from the data and linked:
+#'   text, a factor or a logical is a list of its values (chips for up to 12); a number, a date or a time is a range
+#'   with two handles, over each of its values where it has at most 64, else over bins between `pretty()` breaks. A
+#'   numeric id is a list once it is text: `mutate(id = as.character(as.integer(id)))` (DuckDB writes a double's text
+#'   with a decimal, `1131.0`). A path is split by a range's bins, so a choice shows whole runs.
 #' @param sections For a map started from data, the sidebar's boxes the layers name (their `section`), each a `title`
 #'   and whether it is `open`: `list(Reference = list(open = FALSE))`.
 #' @param palette The grid's palette when the page opens: an `id` of `palettes`.
@@ -1107,11 +1112,12 @@ format.rr_map <- function(x, ...) {
 # arrays
 .rr_choose_checked <- function(choose, taken, what, prefix = "") {
   one <- function(f) {
-    is.character(f$field) && length(f$field) == 1 && length(f$options) > 0
+    is.character(f$field) && length(f$field) == 1 && (length(f$options) > 0 || length(f$bins) > 0)
   }
   if (!length(choose$fields) || !all(vapply(choose$fields, one, logical(1)))) {
     stop(
-      what, " is a list of `fields`, each a `field`, its `options` (each a `value` and a `match`) and its `layers`.",
+      what, " is a list of `fields`, each a `field`, its `options` (each a `value` and a `match`) or a range's ",
+      "`bins` (each a `lo` and a `hi`), and its `layers`.",
       call. = FALSE
     )
   }
@@ -1130,12 +1136,20 @@ format.rr_map <- function(x, ...) {
     if (!is.null(f$layers)) {
       f$layers <- as.list(f$layers)
     }
-    f$options <- lapply(f$options, function(o) {
-      if (!is.null(o$bbox)) {
-        o$bbox <- as.list(o$bbox)
-      }
-      o
-    })
+    boxes <- function(os) {
+      lapply(os, function(o) {
+        if (!is.null(o$bbox)) {
+          o$bbox <- as.list(o$bbox)
+        }
+        o
+      })
+    }
+    if (!is.null(f$options)) {
+      f$options <- boxes(f$options)
+    }
+    if (!is.null(f$bins)) {
+      f$bins <- boxes(f$bins)
+    }
     f
   })
   choose$extents <- lapply(choose$extents, function(e) {

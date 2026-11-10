@@ -82,10 +82,11 @@ vector (\code{c("6" = "bottom trawl")}) or a table of code and label; by default
 
 \item{hover}{A column whose value is shown beside the pointer.}
 
-\item{choose}{The columns, written bare, whose values the reader picks to show of this layer alone, a list each
-under the layer's name: chips for a column of up to 12 values, else a list to show one at a time, with ‹ and ›
-to step. Several lists are linked: each offers only the values the others leave. For lists that drive every
-layer with the column, give \code{choose} to \code{\link[=rr_map]{rr_map()}}.}
+\item{choose}{The columns, written bare, whose values the reader picks to show of this layer alone, each under
+the layer's name: text, a factor or a logical as a list (chips for up to 12 values, else a list to show one at a
+time), a number, a date or a time as a range with two handles; ‹ and › step through either. Several are linked:
+each offers only the values the others leave. For choices that drive every layer with the column, give \code{choose}
+to \code{\link[=rr_map]{rr_map()}}.}
 
 \item{name, info}{The layer's name in the sidebar and the text behind its ⓘ.}
 
