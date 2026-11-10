@@ -1,3 +1,22 @@
+# rebelrebel 2026.11.10.2
+
+* The layer functions, built with the pipe: `rr_point()`, `rr_path()` (rows joined in time, a line per `group`, one
+  column or several), `rr_line()`, `rr_segment()` (a line from each row's start to its end), `rr_polygon()` and
+  `rr_text()`, one internal function for all. They take their arguments in one order and words (`colour`, `fill`,
+  `size`, `linewidth`, `opacity`, `label`; `palette`, `limits`, `stretch`, `legend`; `popup`, `hover`, `choose`;
+  `name`, `info`, `section`, `visible`; `minzoom`, `maxzoom`). A bare name is a column, a string a value.
+* `rr_map(data)` starts a map the layer functions add to; `choose` names the columns the reader picks, `sections` the
+  sidebar's boxes. A layer function given data first starts a map. Data are a parquet file, folder or glob, a lazy
+  DuckDB table, a data frame or an sf object.
+* Colours from the data: Okabe-Ito for up to eight values, Paired for up to twelve, Glasbey's 32 beyond, the rest
+  grey as "other"; viridis for ordered factors, numbers, dates and times (over the 1st to 99th percentile, or
+  `limits`, stretched linearly, on a log scale or in equal shares). `palette` overrides them: a name written loosely,
+  colours, colours by value, or a function of n.
+* The time panel is generic: `rr_time()` takes its columns (`col`, no default) and its group (`by`) from the call or
+  from the map (a path's `group` and `time`); interval tables are read by `start` and `end`, or as named; the page
+  names the group's list by its column and counts rows. Points carry their time and group for it.
+* The quick look at vessels' pings and tracks is no longer here: it is ramb's, as wrappers over these functions.
+
 # rebelrebel 2026.11.10.1
 
 * The base maps are those that show the sea floor: EMODnet's sea floor (its 2020 base

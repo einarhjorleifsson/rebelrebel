@@ -239,9 +239,9 @@ const ENGINE_TEXTS = {
   chooseAll: "all", chooseAllTip: "Show every value", chooseBack: "The previous one", chooseNext: "The next one",
   legendTip: "The colour scale on a log axis, and below it the cells in view: values below the floor and above the cap in the end bars",
   yes: "yes", no: "no",
-  gTime: "Time", tVessel: "Vessel", tSpan: "Span", tCols: "Columns", tMarks: "Marks", tWholeBtn: "Whole span", tWholeTip: "Show the whole span; a double click on the chart does the same",
-  tWhole: "whole ({1})", tLoading: "loading the vessel's pings…", tFailed: "the pings did not come: {1}",
-  tWindow: "{1} to {2}{3} · {4} pings", tThinned: "1 in {1} drawn on the map", tNone: "no pings in this span",
+  gTime: "Time", tVessel: "Group", tSpan: "Span", tCols: "Columns", tMarks: "Marks", tWholeBtn: "Whole span", tWholeTip: "Show the whole span; a double click on the chart does the same",
+  tWhole: "whole ({1})", tLoading: "loading…", tFailed: "the rows did not come: {1}",
+  tWindow: "{1} to {2}{3} · {4} rows", tThinned: "1 in {1} drawn on the map", tNone: "nothing in this span",
   tDrag: "Drag across the chart to choose a time; double click for the whole span",
   gNotes: "Notes", nAdd: "Add a note", nAddTip: "Then click the map where the note belongs (Esc to stop)",
   nPlace: "Click the map…", nShow: "show", nWaiting: "waiting for an answer", nAnswered: "answered",
@@ -915,6 +915,8 @@ function setChosen(i, vals) {
 // its spans named as the map names them (a trip, a voyage), and no list where every vessel has only its whole series
 if (TP) {
   $("g-time").hidden = false;
+  // the group's list named by its column (a vessel, a float, an animal), "Group" where there is none
+  if (TP.by) $("g-time").querySelector('label[for="t-vessel"]').dataset.t = TP.by;
   if (TP.span_label) $("g-time").querySelector('label[for="t-span"]').dataset.t = TP.span_label;
   $("t-span-row").hidden = TP.vessels.every(v => v.spans.length < 2);
 }

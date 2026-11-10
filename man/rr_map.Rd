@@ -14,13 +14,15 @@ rr_map(
   locales = NULL,
   about = NULL,
   choose = NULL,
+  sections = NULL,
   palette = NULL,
   palettes = rr_palettes(),
   basemaps = rr_basemaps()
 )
 }
 \arguments{
-\item{...}{\code{\link[=rr_section]{rr_section()}}s.}
+\item{...}{\code{\link[=rr_section]{rr_section()}}s; or, alone, the data a map starts from (a parquet file, folder or glob, a lazy DuckDB
+table, a data frame or an sf object), which the layer functions (\code{\link[=rr_point]{rr_point()}} and the others) draw.}
 
 \item{title}{The page's title: a key of \code{texts}, or the text itself.}
 
@@ -45,9 +47,14 @@ above the groups, with buttons that step through the values): a list with \code{
 one at a time), its \code{options} (each a \code{value} for the control and the address, a \code{label}, \code{match}, the value the
 layers' features carry, \code{NULL} for none, and optionally \code{bbox}, the extent the view is fitted to) and \code{layers}
 (the ids it filters); and optionally \code{extents}, each a \code{key} (the values of every field joined by the character 31)
-and a \code{bbox}, for the view where every field has one value chosen. \code{.rr_pings()} (internal) and \code{.rr_track()} (internal) make it
-from the data's groups. A choice goes into the address under the field's name, several values separated by
-commas, and nothing is fetched again.}
+and a \code{bbox}, for the view where every field has one value chosen. \code{\link[=rr_map]{rr_map()}} makes it from
+the columns its \code{choose} names. A choice goes into the address under the field's name, several values separated by
+commas, and nothing is fetched again.
+For a map started from data, its columns written bare, \code{choose = c(id, leg)}: a list each above the layers, made
+from the data.}
+
+\item{sections}{For a map started from data, the sidebar's boxes the layers name (their \code{section}), each a \code{title}
+and whether it is \code{open}: \code{list(Reference = list(open = FALSE))}.}
 
 \item{palette}{The grid's palette when the page opens: an \code{id} of \code{palettes}.}
 
@@ -65,11 +72,8 @@ legend under it; base maps to choose from; the whole view in the page's address,
 and on a phone the sidebar behind a menu button. \code{\link[=rr_serve]{rr_serve()}} serves it.
 }
 \details{
-Five whole maps on the example data are scripts in \code{system.file("examples", "map", package = "rebelrebel")}: the Danish
-pings by cell (\code{dansk_map.R}), the same with a cell size, a sample and the interpolation to choose in the page
-(\code{dansk_switches_map.R}), the Danish pings with a time panel under the map (\code{dansk_time_map.R}, \code{\link[=rr_time]{rr_time()}}),
-the Italian tracks' voyages by two rules (\code{cnr_map.R}), and iapesca's example vessel (\code{iapesca_map.R}, which needs
-iapesca).
+Given data first, \code{rr_map(data)} starts a map that the layer functions add to (\code{\link[=rr_point]{rr_point()}} and the others), the
+data the layers' unless a layer brings its own.
 }
 \examples{
 harbours <- rr_layer(

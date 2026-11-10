@@ -614,13 +614,11 @@ rr_section <- function(id, title = id, layers, open = TRUE) {
 #' legend under it; base maps to choose from; the whole view in the page's address, so a link gives the same view;
 #' and on a phone the sidebar behind a menu button. [rr_serve()] serves it.
 #'
-#' Five whole maps on the example data are scripts in `system.file("examples", "map", package = "rebelrebel")`: the Danish
-#' pings by cell (`dansk_map.R`), the same with a cell size, a sample and the interpolation to choose in the page
-#' (`dansk_switches_map.R`), the Danish pings with a time panel under the map (`dansk_time_map.R`, [rr_time()]),
-#' the Italian tracks' voyages by two rules (`cnr_map.R`), and iapesca's example vessel (`iapesca_map.R`, which needs
-#' iapesca).
+#' Given data first, `rr_map(data)` starts a map that the layer functions add to ([rr_point()] and the others), the
+#' data the layers' unless a layer brings its own.
 #'
-#' @param ... [rr_section()]s.
+#' @param ... [rr_section()]s; or, alone, the data a map starts from (a parquet file, folder or glob, a lazy DuckDB
+#'   table, a data frame or an sf object), which the layer functions ([rr_point()] and the others) draw.
 #' @param title The page's title: a key of `texts`, or the text itself.
 #' @param view The first view: `center` (longitude, latitude) and `zoom`.
 #' @param texts The texts of the layers and groups, and of the page in other languages: a named list whose elements
@@ -637,9 +635,13 @@ rr_section <- function(id, title = id, layers, open = TRUE) {
 #'   one at a time), its `options` (each a `value` for the control and the address, a `label`, `match`, the value the
 #'   layers' features carry, `NULL` for none, and optionally `bbox`, the extent the view is fitted to) and `layers`
 #'   (the ids it filters); and optionally `extents`, each a `key` (the values of every field joined by the character 31)
-#'   and a `bbox`, for the view where every field has one value chosen. `.rr_pings()` (internal) and `.rr_track()` (internal) make it
-#'   from the data's groups. A choice goes into the address under the field's name, several values separated by
+#'   and a `bbox`, for the view where every field has one value chosen. [rr_map()] makes it from
+#'   the columns its `choose` names. A choice goes into the address under the field's name, several values separated by
 #'   commas, and nothing is fetched again.
+#'   For a map started from data, its columns written bare, `choose = c(id, leg)`: a list each above the layers, made
+#'   from the data.
+#' @param sections For a map started from data, the sidebar's boxes the layers name (their `section`), each a `title`
+#'   and whether it is `open`: `list(Reference = list(open = FALSE))`.
 #' @param palette The grid's palette when the page opens: an `id` of `palettes`.
 #' @param palettes,basemaps The palettes and base maps to choose from: [rr_palettes()], [rr_basemaps()]. The
 #'   grid offers the palettes for its use (`use` holding `"grid"`, or no `use`); a dem layer's colour offers its own
@@ -667,10 +669,28 @@ rr_map <- function(
   locales = NULL,
   about = NULL,
   choose = NULL,
+  sections = NULL,
   palette = NULL,
   palettes = rr_palettes(),
   basemaps = rr_basemaps()
 ) {
+  # a map started from data (the pipe): it holds the data until a layer function (rr_point() and the others)
+  # adds the first layer; `choose` then names the data's columns, bare
+  choose_q <- rlang::enquo(choose)
+  first <- if (...length()) ..1
+  is_data <- is.data.frame(first) || inherits(first, "tbl_lazy") ||
+    (is.character(first) && length(first) == 1 && grepl("parquet|[*?]", first))
+  if (is_data) {
+    if (...length() > 1) {
+      stop("rr_map(data) takes one table; its layers come from rr_point() and the other layer functions.", call. = FALSE)
+    }
+    return(structure(
+      list(config = list(title = title), layers = list()),
+      class = "rr_map",
+      quick = list(pending = list(data = first, choose_q = choose_q, title = title, port = 8790L, sections = sections))
+    ))
+  }
+  choose <- rlang::eval_tidy(choose_q)
   groups <- list(...)
   if (
     !length(groups) ||
@@ -1069,12 +1089,15 @@ format.rr_map <- function(x, ...) {
     ""
   )
   tp <- x$config$time
+  if (!length(layers) && !is.null(attr(x, "quick")$pending)) {
+    return(c(sprintf("<rr_map> %s", .rr_or(x$config$title, "")), "  no layers yet: add them with rr_point() and the other layer functions"))
+  }
   c(
     sprintf("<rr_map> %s", .rr_or(x$config$title, "")),
     sprintf("  layers: %s", paste(layers, collapse = ", ")),
     if (!is.null(tp)) {
       sprintf(
-        "  time panel: %s over time, %d vessel%s%s%s",
+        "  time panel: %s over time, %d group%s%s%s",
         paste(vapply(tp$cols, `[[`, "", "field"), collapse = ", "),
         length(tp$vessels),
         if (length(tp$vessels) == 1) "" else "s",

@@ -34,8 +34,8 @@ substrate; \code{deep}, the grid's too; \code{chart}, the nautical chart's conve
 white; \code{grey}, a ground for other layers, pulling no overlay's hue; and two daring ones, \code{drained}, the seabed as
 if the sea were drained (GMT's globe hypsometry, the deeps green lowland, the banks brown hills), and \code{haxby},
 marine geology's multibeam palette, orange shallows through green to deep blue. Each ends at least 0.03 in OKLab
-from the light base maps' land, so the shallowest water does not read as land. They were made for a bathymetry map
-of Icelandic waters (2026-11-09): quiet, seabed, chart and grey designed in OKLCh, drained and haxby resampled from
+from the light base maps' land, so the shallowest water does not read as land. They were made for a
+bathymetry map of Icelandic waters (2026-11-09): quiet, seabed, chart and grey designed in OKLCh, drained and haxby resampled from
 tidyterra to 17 stops at even steps in OKLab, their whitest stops dropped.
 }
 

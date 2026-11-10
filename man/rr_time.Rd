@@ -2,11 +2,11 @@
 % Please edit documentation in R/time.R
 \name{rr_time}
 \alias{rr_time}
-\title{A time panel under the map: one vessel's pings over time, linked to the map}
+\title{A time panel under the map: one group's rows over time, linked to the map}
 \usage{
 rr_time(
   x,
-  col = "speed",
+  col,
   marks = NULL,
   lanes = NULL,
   span = NULL,
@@ -23,49 +23,46 @@ rr_time(
 )
 }
 \arguments{
-\item{x}{Pings: a data frame or lazy DuckDB table with \code{lon} and \code{lat} (WGS 84), or an sf object of points; or a
-map made by this function or by the internal quick look at pings.}
+\item{x}{Rows: a data frame or lazy DuckDB table with \code{lon} and \code{lat} (WGS 84), or an sf object of points; or a
+map, whose rows, time and group (from \code{\link[=rr_path]{rr_path()}}) the panel takes.}
 
 \item{col}{The numeric columns drawn over time, a name, a string or \code{c()} of them; the first shown.}
 
-\item{marks}{Columns that mark pings, as \code{col}: a logical column marks its \code{TRUE} pings, any other its values that
+\item{marks}{Columns that mark rows, as \code{col}: a logical column marks its \code{TRUE} rows, any other its values that
 are not missing (such as a flag's label). Each column is a row of ticks along the chart's top and a ring on the
 map in a colour of its own, named in the sidebar; \code{c(truth = "wrong", clean = "flag")} names them.}
 
 \item{lanes}{Intervals drawn as lanes under the chart: a named list (the names are the lanes' labels), each
 \itemize{
-\item a column of the pings, as a string: its runs of one value (a trip, a voyage, a phase), missing values left out
-and a run broken by a silence longer than \code{max_gap_s};
-\item a table of intervals with the vessel column (\code{by}), and its start and end in \code{T_in} and \code{T_out} (port calls,
-\code{ramb::rb_create_port_calls()}), \code{T1} and \code{T2} (voyages, \code{ramb::rb_create_voyages()}), \code{w_start} and \code{w_end} (records'
-windows) or \code{start} and \code{end};
+\item a column of the rows, as a string: its runs of one value (a phase, a leg), missing values left out and a run
+broken by a silence longer than \code{max_gap_s};
+\item a table of intervals with the group's column (\code{by}), and its start and end in \code{start} and \code{end};
 \item or \code{list(data = , start = , end = , label = )}, naming the columns, \code{label} a column that names each interval.
 }}
 
-\item{span}{Units the page holds one at a time, chosen besides the whole series: a column of the pings that names
-them, as a string (a trip, a voyage, a haul: \code{"trip_id"}, or \code{c(trip = "trip_id")} to name the list), one span per
-value from its first ping to its last; or a table of intervals, or \code{list(data = , start = , end = , label = )}, as
-for \code{lanes}, named as a column is with \verb{list(trips = <table>)}. A span holds every ping of its vessel from its start
-to its end, those whose value is missing too, such
-as a ping a filter removed. Spans that overlap are reported: a state that comes and goes, such as behaviour,
+\item{span}{Units the page holds one at a time, chosen besides the whole series: a column of the rows that names
+them, as a string (a leg, a deployment: \code{"leg"}, or \code{c(leg = "leg_id")} to name the list), one span per value from
+its first row to its last; or a table of intervals, or \code{list(data = , start = , end = , label = )}, as
+for \code{lanes}, named as a column is with \verb{list(legs = <table>)}. A span holds every row of its group from its start
+to its end, those whose value is missing too. Spans that overlap are reported: a state that comes and goes, such as behaviour,
 belongs in \code{lanes}. \code{NULL}, the default, offers the whole series alone.}
 
-\item{max_gap_s}{A silence between two pings longer than this many seconds breaks the panel's line, on the chart
-and on the map, and a lane's run of one value. By default the track's (\code{.rr_track()} (internal)'s \code{max_gap_s}) when the
-map has a track already, else \code{Inf}: nothing broken, so no gap is hidden.}
+\item{max_gap_s}{A silence between two rows longer than this many seconds breaks the panel's line, on the chart
+and on the map, and a lane's run of one value. By default a path's (\code{\link[=rr_path]{rr_path()}}'s \code{max_gap_s}) when the map has
+one already, else \code{Inf}: nothing broken, so no gap is hidden.}
 
-\item{span_max}{The most pings the page holds at once: a vessel with more is offered by its spans, else by month.
-The browser holds far more than the default is likely to meet: a series of 2.2 million pings loaded in about
+\item{span_max}{The most rows the page holds at once: a group with more is offered by its spans, else by month.
+The browser holds far more than the default is likely to meet: a series of 2.2 million rows loaded in about
 8 seconds, most of it the transfer.}
 
 \item{time_label}{The clock the times are on, shown beside them.}
 
-\item{data}{Pings for this panel, in place of the map's.}
+\item{data}{Rows for this panel, in place of the map's.}
 
 \item{lon, lat, time}{The position and time columns: by default the map's, else \code{"lon"}, \code{"lat"} and \code{"time"}.}
 
-\item{by}{The vessel column, a name or a string: one series each. By default the map's, else \code{vid} where the data
-have it, else one series of all the pings.}
+\item{by}{The column whose values each have a series, a name or a string: by default the map's (a path's
+\code{group}), else one series of all the rows.}
 
 \item{title, port}{The page's title, and where the map is served when printed: set by the call that starts it.}
 }
@@ -73,40 +70,39 @@ have it, else one series of all the pings.}
 An \code{\link[=rr_map]{rr_map()}} with the time panel.
 }
 \description{
-\code{rr_time()} adds a panel under a map from \code{.rr_pings()} (internal) or \code{.rr_track()} (internal), or starts a map with it, that
-shows one vessel's pings over time:
+\code{rr_time()} adds a panel under a map, or starts a map with it, that shows one group's rows over time (a vessel's,
+a float's, an animal's: the values of \code{by}):
 \itemize{
-\item a column or several as lines (speed by default), the first shown and the others ticked on in the panel;
+\item a column or several as lines, the first shown and the others ticked on in the panel;
 \item marks where a column says so (a flag), on the chart and on the map;
-\item lanes of intervals under the chart (port calls, voyages, trips, records' windows), a click on one setting the
-window to it.
+\item lanes of intervals under the chart (visits, legs, phases), a click on one setting the window to it.
 }
 }
 \details{
 The panel and the map are linked. A drag across the chart sets the time window, and a double click goes back to
-the whole span. The map draws the window's track and pings, and fits to them. A hover on the chart marks that ping on
-the map, and a click on a ping of the window marks its time on the chart. The vessel, the span and the window go into
-the page's address.
+the whole span. The map draws the window's path and points, and fits to them. A hover on the chart marks that row
+on the map, and a click on a point of the window marks its time on the chart. The group, the span and the window go
+into the page's address.
 
-The page holds one vessel's span at a time: by default its whole series; with \code{span}, also each of its trips or other
-intervals, chosen under \emph{Span}. A vessel with more than \code{span_max} pings is offered by its spans only, or by month
-where there are none. The map's other layers show only the chosen vessel and span, so the pings of the vessel's other
-times and of other vessels are out of the way; a track's line that runs over a span's start or end is shown whole.
-The window's track is drawn whole, its pings thinned to about 5,000 (every k-th, a marked one always), so the map
-stays quick.
+The page holds one group's span at a time: by default its whole series; with \code{span}, also each of its intervals,
+chosen under \emph{Span}. A group with more than \code{span_max} rows is offered by its spans only, or by month where there
+are none. The map's other layers that carry the group and a time (\code{\link[=rr_path]{rr_path()}}, \code{\link[=rr_point]{rr_point()}}) show only the chosen
+group and span; a path's line that runs over a span's start or end is shown whole. The window's path is drawn whole,
+its points thinned to about 5,000 (every k-th, a marked one always), so the map stays quick.
 
 Times are shown as the data hold them, in no time zone, labelled by \code{time_label}.
 }
 \examples{
 \donttest{
 d <- dplyr::filter(dplyr::collect(rr_example("dansk")), vessel_id \%in\% c("EX_1", "EX_12"))
-m <- d |>
-  rr_time(speed, lanes = list(behaviour = "behaviour"), time = "time_stamp", by = vessel_id)
+m <- rr_map(d) |>
+  rr_path(group = vessel_id, time = time_stamp) |>
+  rr_time(speed, lanes = list(behaviour = "behaviour"))
 format(m)
 # m  # printed at the console, the map opens with the panel under it
 }
 }
 \seealso{
-\code{.rr_pings()} (internal) and \code{.rr_track()} (internal), the layers it pairs with; \code{\link[=rr_bundle]{rr_bundle()}}, which writes the
-panel's series beside the page.
+\code{\link[=rr_path]{rr_path()}} and \code{\link[=rr_point]{rr_point()}}, the layers it pairs with; \code{\link[=rr_bundle]{rr_bundle()}}, which writes the panel's series
+beside the page.
 }

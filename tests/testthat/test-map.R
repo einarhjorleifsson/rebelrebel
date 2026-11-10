@@ -1,19 +1,6 @@
 # The map viewer (map.R): the config, the server's routes called as httpuv calls them (no network), the checks on a
 # grid's parameters, the table tiles, and a real server started and stopped. All on the example data.
 
-skip_if_no_spatial <- function() {
-  con <- .rr_connection()
-  ok <- !inherits(
-    try(DBI::dbExecute(con, "LOAD spatial"), silent = TRUE),
-    "try-error"
-  ) ||
-    !inherits(
-      try(DBI::dbExecute(con, "INSTALL spatial; LOAD spatial"), silent = TRUE),
-      "try-error"
-    )
-  skip_if_not(ok, "DuckDB's spatial extension is not available")
-}
-
 get <- function(app, path, query = "") {
   app$call(list(REQUEST_METHOD = "GET", PATH_INFO = path, QUERY_STRING = query))
 }
@@ -568,134 +555,6 @@ test_that("a layer's state: values its style reads, checked as they are made", {
   expect_error(rr_map(rr_section("g", layers = list(n, other))), "another layer's state")
 })
 
-test_that("pings on a map, coloured by a column", {
-  skip_if_no_spatial()
-  d <- rr_example("dansk")
-  m <- .rr_pings(d, time = "time_stamp")
-  expect_s3_class(m, "rr_map")
-  expect_equal(vapply(m$config$layers, `[[`, "", "id"), "pings")
-  expect_equal(m$config$basemaps[[1]]$id, "emodnet")
-  # a numeric column: a continuous palette, grey where it is missing; five steps in the legend
-  expect_equal(
-    m$config$layers[[1]]$style[[1]]$paint[["circle-color"]][[1]],
-    "case"
-  )
-  expect_length(m$config$layers[[1]]$legend, 5)
-  expect_equal(attr(m$layers$pings$tiles, "count"), 395558L)
-  # a column by name: a colour per value
-  m2 <- .rr_pings(d, behaviour, time = "time_stamp")
-  expect_equal(
-    m2$config$layers[[1]]$style[[1]]$paint[["circle-color"]][[1]],
-    "match"
-  )
-  expect_setequal(
-    vapply(m2$config$layers[[1]]$legend, `[[`, "", "label"),
-    c("Fishing", "Other")
-  )
-  # a data frame and sf points give the same pings
-  df <- dplyr::collect(utils::head(d, 500))
-  expect_equal(
-    attr(.rr_pings(df, time = "time_stamp")$layers$pings$tiles, "count"),
-    500L
-  )
-  s <- sf::st_as_sf(df, coords = c("lon", "lat"), crs = 4326)
-  expect_equal(
-    attr(.rr_pings(s, time = "time_stamp")$layers$pings$tiles, "count"),
-    500L
-  )
-  expect_error(.rr_pings(d, nope), "No column nope")
-  expect_output(print(m), "<rr_map> Track", fixed = TRUE) # not at a console: a summary
-})
-
-test_that("pings coloured by several columns, chosen in the page", {
-  skip_if_no_spatial()
-  d <- rr_example("dansk")
-  m <- .rr_pings(d, c(speed, course, behaviour), time = "time_stamp")
-  l <- m$config$layers[[1]]
-  expect_equal(
-    vapply(l$variants$options, `[[`, "", "value"),
-    c("speed", "course", "behaviour")
-  )
-  # the page opens on the first: the style's paint is the first option's
-  expect_identical(
-    l$style[[1]]$paint[["circle-color"]],
-    l$variants$options[[1]]$paint[["pings-dot"]][["circle-color"]]
-  )
-  expect_equal(
-    vapply(l$variants$options, function(o) length(o$legend), 1),
-    c(5, 5, 2)
-  )
-  expect_equal(
-    l$variants$options[[3]]$paint[["pings-dot"]][["circle-color"]][[2]][[2]],
-    "rb_class_3"
-  )
-  expect_equal(
-    vapply(l$popup$fields, `[[`, "", "field"),
-    c("speed", "course", "behaviour")
-  )
-  # a tile carries every column, so a choice fetches nothing
-  t <- m$layers$pings$tiles(11, 1095, 641)
-  text <- rawToChar(t[t >= as.raw(32) & t < as.raw(127)])
-  for (f in c("speed", "course", "rb_class_3")) {
-    expect_match(text, f, fixed = TRUE)
-  }
-  cols <- c("speed", "behaviour") # a variable holding column names
-  expect_length(
-    .rr_pings(d, cols, time = "time_stamp")$config$layers[[
-      1
-    ]]$variants$options,
-    2
-  )
-  expect_null(
-    .rr_pings(d, "speed", time = "time_stamp")$config$layers[[1]]$variants
-  )
-})
-
-test_that("a track: a line per vessel broken at silences, or coloured by runs of a column, joined", {
-  skip_if_no_spatial()
-  d <- rr_example("dansk")
-  # by default one line a vessel, however long it falls silent; with max_gap_s, broken at the silences
-  one <- .rr_track(d, time = "time_stamp", by = vessel_id)
-  expect_equal(attr(one$layers$path$tiles, "count"), 14L)
-  expect_equal(
-    one$config$layers[[1]]$info,
-    "The pings of each vessel_id joined in time order."
-  )
-  plain <- .rr_track(d, time = "time_stamp", by = vessel_id, max_gap_s = 3600)
-  expect_gt(attr(plain$layers$path$tiles, "count"), 14L)
-  expect_match(plain$config$layers[[1]]$info, "more than 1 hour apart.", fixed = TRUE)
-  # a run ends where the next begins, except at a silence: as many unjoined ends as the plain line has stretches
-  ends <- function(m) {
-    DBI::dbGetQuery(
-      .rr_connection(),
-      sprintf(
-        "WITH r AS (SELECT ST_AsText(ST_StartPoint(g3857)) AS s, ST_AsText(ST_EndPoint(g3857)) AS e FROM %s)
-         SELECT count(*) FILTER (WHERE e NOT IN (SELECT s FROM r)) AS n FROM r",
-        attr(m$layers$path$tiles, "table")
-      )
-    )$n
-  }
-  m <- .rr_track(d, behaviour, time = "time_stamp", by = vessel_id)
-  p <- m$config$layers[[1]]
-  expect_equal(p$label, "Track by behaviour")
-  expect_setequal(vapply(p$legend, `[[`, "", "label"), c("Fishing", "Other"))
-  expect_equal(p$info, "The pings of each vessel_id joined in time order and coloured by behaviour.")
-  expect_equal(ends(m), 14L)
-  m1 <- .rr_track(d, behaviour, time = "time_stamp", by = vessel_id, max_gap_s = 3600)
-  expect_equal(ends(m1), attr(plain$layers$path$tiles, "count"))
-  expect_match(m1$config$layers[[1]]$info, "1 hour apart, and coloured by behaviour.", fixed = TRUE)
-  expect_error(
-    .rr_track(d, time = "time_stamp", max_gap_s = 0),
-    "number of seconds"
-  )
-  expect_error(
-    .rr_track(d, time = "time_stamp", max_gap_s = "1 hour"),
-    "number of seconds"
-  )
-  expect_error(.rr_track(d, by = vessel_id), "time order")
-  expect_error(.rr_track(d, nope, time = "time_stamp"), "No column nope")
-})
-
 test_that("a gap in words: whole hours, minutes or seconds, else hours", {
   expect_equal(.rr_duration_text(3600), "1 hour")
   expect_equal(.rr_duration_text(7200), "2 hours")
@@ -703,35 +562,6 @@ test_that("a gap in words: whole hours, minutes or seconds, else hours", {
   expect_equal(.rr_duration_text(1800), "30 minutes")
   expect_equal(.rr_duration_text(60), "1 minute")
   expect_equal(.rr_duration_text(90), "90 seconds")
-})
-
-test_that("layers compose: each adds to the map piped in, from its pings and settings", {
-  skip_if_no_spatial()
-  d <- rr_example("dansk")
-  m <- d |>
-    .rr_track(behaviour, time = "time_stamp", by = vessel_id) |>
-    .rr_pings(c(behaviour, speed))
-  expect_equal(vapply(m$config$layers, `[[`, "", "id"), c("path", "pings")) # the later drawn over the earlier
-  # the line's colours are the points' for the same column
-  expect_identical(
-    m$config$layers[[1]]$style[[1]]$paint[["line-color"]][-2],
-    m$config$layers[[2]]$style[[1]]$paint[["circle-color"]][-2]
-  )
-  expect_equal(m$config$layers[[2]]$popup$title, "time_stamp") # the map's time, not given again
-  # other pings on top, numbered
-  h <- dplyr::mutate(dplyr::collect(utils::head(d, 1000)), kind = "sample")
-  m2 <- .rr_pings(m, kind, data = h)
-  expect_equal(
-    vapply(m2$config$layers, `[[`, "", "id"),
-    c("path", "pings", "pings_2")
-  )
-  expect_equal(m2$config$layers[[3]]$label, "Pings 2")
-  expect_length(attr(m2, "tables"), 3)
-  expect_error(.rr_pings(m, by = vessel_id), "give `data`")
-  expect_error(
-    rr_map(rr_section("g", layers = m$layers)) |> .rr_pings(),
-    "rr_map\\(\\)"
-  )
 })
 
 test_that("a map is served when printed at a console; a replaced map's tables are dropped and made again", {
@@ -748,118 +578,18 @@ test_that("a map is served when printed at a console; a replaced map's tables ar
   }
   df <- dplyr::collect(utils::head(rr_example("dansk"), 500))
   port <- httpuv::randomPort()
-  m1 <- .rr_track(df, time = "time_stamp", port = port) |> .rr_pings()
-  m2 <- .rr_pings(df, behaviour, time = "time_stamp", port = port)
+  m1 <- rr_path(df, group = vessel_id, time = time_stamp) |> rr_point()
+  m2 <- rr_point(df, colour = behaviour)
+  attr(m1, "port") <- port
+  attr(m2, "port") <- port
   rlang::with_interactive(print(m1))
   expect_true(all(exists(m1)))
   rlang::with_interactive(print(m2)) # on the same port: m1's tables go
   expect_false(any(exists(m1)))
-  expect_gt(length(m1$layers$pings$tiles(10, 547, 320)), 0) # shown again, a table is made again
+  expect_gt(length(m1$layers$points$tiles(10, 547, 320)), 0) # shown again, a table is made again
   expect_true(exists(m1)[2])
   expect_equal(rr_stop(port), port)
   expect_false(any(exists(m2)))
-})
-
-test_that("two tracks by different columns: each cut by its own runs, a layer of its own", {
-  skip_if_no_spatial()
-  d <- rr_example("dansk")
-  m <- d |>
-    .rr_track(behaviour, time = "time_stamp", by = vessel_id) |>
-    .rr_track(speed) |>
-    .rr_pings()
-  expect_equal(
-    vapply(m$config$layers, `[[`, "", "id"),
-    c("path", "path_2", "pings")
-  )
-  expect_equal(
-    vapply(m$config$layers, `[[`, "", "label"),
-    c("Track by behaviour", "Track by speed", "Pings")
-  )
-  one <- .rr_track(d, behaviour, time = "time_stamp", by = vessel_id)
-  expect_equal(
-    attr(m$layers$path$tiles, "count"),
-    attr(one$layers$path$tiles, "count")
-  ) # its own runs
-  expect_equal(
-    m$config$layers[[2]]$style[[1]]$paint[["line-color"]][[1]],
-    "case"
-  ) # speed: a palette
-  # a name two layers would share is numbered
-  two <- d |>
-    .rr_track(time = "time_stamp", by = vessel_id) |>
-    .rr_track()
-  expect_equal(
-    vapply(two$config$layers, `[[`, "", "label"),
-    c("Track", "Track 2")
-  )
-  expect_error(
-    .rr_track(d, c(behaviour, speed), time = "time_stamp"),
-    "call .rr_track() again",
-    fixed = TRUE
-  )
-})
-
-test_that("grouped pings: a choice per group column, over every layer that has it", {
-  skip_if_no_spatial()
-  d <- rr_example("dansk")
-  m <- d |>
-    dplyr::group_by(vessel_id) |>
-    .rr_track(time = "time_stamp") |>
-    .rr_pings()
-  ch <- m$config$choose
-  expect_equal(vapply(ch$fields, `[[`, "", "field"), "vessel_id")
-  expect_length(ch$fields[[1]]$options, 14)
-  expect_equal(unlist(ch$fields[[1]]$layers), c("path", "pings"))
-  expect_length(ch$fields[[1]]$options[[1]]$bbox, 4)
-  expect_false(ch$fields[[1]]$multi) # 14 values: a list, one at a time
-  # every ping counted once among the options
-  counts <- as.integer(gsub(
-    ",",
-    "",
-    sub(
-      "[)]$",
-      "",
-      sub("^.*[(]", "", vapply(ch$fields[[1]]$options, `[[`, "", "label"))
-    )
-  ))
-  expect_equal(sum(counts), 395558L)
-  # the groups cut the track: each vessel's line its own, as with `by`
-  expect_equal(
-    attr(m$layers$path$tiles, "count"),
-    attr(
-      .rr_track(d, time = "time_stamp", by = vessel_id)$layers$path$tiles,
-      "count"
-    )
-  )
-  # `choose` without grouping; two fields, and the extents of their combinations
-  m2 <- .rr_pings(d, choose = c(vessel_id, behaviour), time = "time_stamp")
-  expect_equal(
-    vapply(m2$config$choose$fields, `[[`, "", "field"),
-    c("vessel_id", "behaviour")
-  )
-  expect_true(m2$config$choose$fields[[2]]$multi) # two values: chips, so both can show
-  expect_gt(length(m2$config$choose$extents), 14)
-  expect_match(m2$config$choose$extents[[1]]$key, intToUtf8(31), fixed = TRUE)
-  # a number is matched as a number; other data without the field are left as they are
-  m3 <- d |>
-    dplyr::mutate(r = .rowid %% 3L) |>
-    dplyr::group_by(r) |>
-    .rr_pings(time = "time_stamp") |>
-    .rr_pings(name, data = data.frame(lon = 12.6, lat = 56, name = "here"))
-  expect_true(is.numeric(m3$config$choose$fields[[1]]$options[[1]]$match))
-  expect_equal(unlist(m3$config$choose$fields[[1]]$layers), "pings")
-  expect_null(.rr_pings(d, time = "time_stamp")$config$choose)
-  expect_warning(
-    .rr_pings(m, choose = behaviour),
-    "set by the call that starts it"
-  )
-  expect_error(
-    d |>
-      dplyr::rename(base = vessel_id) |>
-      dplyr::group_by(base) |>
-      .rr_pings(time = "time_stamp"),
-    "named as the page's address"
-  )
 })
 
 test_that("a dem layer: elevation images from an MBTiles file, served as images under their own extension", {
@@ -1523,6 +1253,7 @@ test_that("a time panel: each vessel and its spans in the config, a span's serie
   m <- rr_time(
     d,
     c(speed, course),
+    by = vid,
     marks = flag,
     lanes = list(behaviour = "behaviour"),
     span_max = 10000
@@ -1533,9 +1264,9 @@ test_that("a time panel: each vessel and its spans in the config, a span's serie
   # a mark's label: its column's, or the name it is given
   expect_equal(tp$marks, list(list(field = "flag", label = "flag")))
   d$fast <- d$speed > 8
-  named <- rr_time(d, marks = c(slow = flag, quick = "fast"))$config$time$marks
+  named <- rr_time(d, speed, by = vid, marks = c(slow = flag, quick = "fast"))$config$time$marks
   expect_equal(named, list(list(field = "flag", label = "slow"), list(field = "fast", label = "quick")))
-  expect_equal(rr_time(d, marks = c(flag, quick = fast))$config$time$marks[[1]]$label, "flag")
+  expect_equal(rr_time(d, speed, by = vid, marks = c(flag, quick = fast))$config$time$marks[[1]]$label, "flag")
   expect_equal(tp$lanes[[1]]$label, "behaviour")
   # a vessel with more than span_max pings is offered by month only, its latest month first
   ex12 <- tp$vessels[[2]]
@@ -1564,7 +1295,7 @@ test_that("a time panel: each vessel and its spans in the config, a span's serie
   expect_setequal(unique(l$label), unique(e1$behaviour))
   # no gap breaks the panel's line or a lane's run by default; max_gap_s does, the panel's own or the track's
   expect_null(tp$max_gap_s)
-  m2 <- rr_time(d, lanes = list(behaviour = "behaviour"), max_gap_s = 3600)
+  m2 <- rr_time(d, speed, by = vid, lanes = list(behaviour = "behaviour"), max_gap_s = 3600)
   expect_equal(m2$config$time$max_gap_s, 3600)
   l2 <- jsonlite::fromJSON(get(.rr_map_app(m2), "/time", "v=EX_1&span=all")$body)$lanes[["1"]]
   expect_gt(length(l2$t0), length(l$t0))
@@ -1573,14 +1304,14 @@ test_that("a time panel: each vessel and its spans in the config, a span's serie
   expect_true(all(mapply(inside, l2$t0, l2$t1) <= 3600))
   expect_gt(max(mapply(inside, l$t0, l$t1)), 3600)
   expect_equal(
-    (d |> .rr_track(max_gap_s = 1800) |> rr_time())$config$time$max_gap_s,
+    (d |> rr_path(group = vid, time = time, max_gap_s = 1800) |> rr_time(speed))$config$time$max_gap_s,
     1800
   )
   expect_equal(
-    (d |> .rr_track(max_gap_s = 1800) |> rr_time(max_gap_s = 60))$config$time$max_gap_s,
+    (d |> rr_path(group = vid, time = time, max_gap_s = 1800) |> rr_time(speed, max_gap_s = 60))$config$time$max_gap_s,
     60
   )
-  expect_error(rr_time(d, max_gap_s = -1), "number of seconds")
+  expect_error(rr_time(d, speed, by = vid, max_gap_s = -1), "number of seconds")
   # a month's span, and the refusals
   r <- get(app, "/time", "v=EX_12&span=2014-12")
   expect_equal(r$status, 200L)
@@ -1595,7 +1326,7 @@ test_that("a time panel: each vessel and its spans in the config, a span's serie
   )
   expect_equal(get(app, "/time", "")$status, 400L)
   expect_equal(
-    get(.rr_map_app(.rr_pings(d)), "/time", "v=EX_1&span=all")$status,
+    get(.rr_map_app(rr_point(d)), "/time", "v=EX_1&span=all")$status,
     404L
   )
 })
@@ -1603,8 +1334,8 @@ test_that("a time panel: each vessel and its spans in the config, a span's serie
 test_that("a time panel pipes with the layers, either way round, one to a map", {
   skip_if_no_spatial()
   d <- time_pings()
-  m <- d |> .rr_track(behaviour) |> rr_time(speed) |> .rr_pings(speed)
-  expect_equal(vapply(m$config$layers, `[[`, "", "id"), c("path", "pings"))
+  m <- d |> rr_path(group = vid, time = time, colour = behaviour) |> rr_time(speed) |> rr_point(colour = speed)
+  expect_equal(vapply(m$config$layers, `[[`, "", "id"), c("paths", "points"))
   expect_false(is.null(m$config$time))
   expect_true(is.function(m$time$series))
   # the panel's tables go with the map's, dropped when it is replaced on its port
@@ -1613,11 +1344,11 @@ test_that("a time panel pipes with the layers, either way round, one to a map", 
       vapply(attr(m, "tables"), `[[`, "", "name")
   ))
   expect_error(rr_time(m, speed), "one time panel")
-  expect_match(format(m)[3], "time panel: speed over time, 2 vessels")
+  expect_match(format(m)[3], "time panel: speed over time, 2 groups")
   # vessels in natural order where their keys are not all numbers
   expect_equal(order(.rr_natural_key(c("EX_10", "EX_2", "EX_1"))), c(3L, 2L, 1L))
   # a map of the panel alone
-  m0 <- rr_time(d)
+  m0 <- rr_time(d, speed, by = vid)
   expect_length(m0$config$layers, 0)
   expect_equal(m0$config$time$cols[[1]]$field, "speed")
 })
@@ -1640,8 +1371,9 @@ test_that("a time panel's lanes from interval tables, its vessel keys matched ac
   )
   m <- rr_time(
     d,
+    speed,
     by = v,
-    lanes = list(calls = list(data = calls, label = "port"), voyages = voyages)
+    lanes = list(calls = list(data = calls, start = "T_in", end = "T_out", label = "port"), voyages = voyages)
   )
   app <- .rr_map_app(m)
   s1 <- jsonlite::fromJSON(get(app, "/time", "v=1&span=all")$body)
@@ -1649,20 +1381,20 @@ test_that("a time panel's lanes from interval tables, its vessel keys matched ac
   s2 <- jsonlite::fromJSON(get(app, "/time", "v=2&span=all")$body)
   expect_equal(s2$lanes[["2"]]$t0, as.numeric(voyages$start))
   expect_error(
-    rr_time(d, lanes = list(x = data.frame(v = 1, a = Sys.time()))),
+    rr_time(d, speed, by = vid, lanes = list(x = data.frame(v = 1, a = Sys.time()))),
     "no start and end"
   )
-  expect_error(rr_time(d, lanes = list(x = "nope")), "no column nope")
-  expect_error(rr_time(d, lanes = list("behaviour")), "named list")
-  expect_error(rr_time(d, behaviour), "numeric")
-  expect_error(rr_time(d[, c("vid", "lon", "lat", "speed")]), "time column")
+  expect_error(rr_time(d, speed, by = vid, lanes = list(x = "nope")), "no column nope")
+  expect_error(rr_time(d, speed, by = vid, lanes = list("behaviour")), "named list")
+  expect_error(rr_time(d, behaviour, by = vid), "numeric")
+  expect_error(rr_time(d[, c("vid", "lon", "lat", "speed")], speed, by = vid), "time column")
 })
 
 test_that("a time panel's spans: the whole series of raw pings, or a column's runs or a table's intervals", {
   skip_if_no_spatial()
   d <- time_pings()
   # raw pings, nothing but time and position: each vessel's whole series alone, no months, no list in the page
-  tp <- rr_time(d)$config$time
+  tp <- rr_time(d, speed, by = vid)$config$time
   expect_equal(
     lapply(tp$vessels, function(v) vapply(v$spans, `[[`, "", "value")),
     list("all", "all")
@@ -1671,10 +1403,10 @@ test_that("a time panel's spans: the whole series of raw pings, or a column's ru
   # a column's runs of one value: numbered in time order, named by value and start, a span holding every ping of its
   # vessel from its start to its end; the column's name, or the name given, labels them
   d$haul <- ifelse(d$behaviour == "Fishing", paste0("h", cumsum(c(1, diff(d$behaviour == "Fishing") == 1))), NA)
-  m <- rr_time(d, span = c(Haul = "haul"))
+  m <- rr_time(d, speed, by = vid, span = c(Haul = "haul"))
   tp <- m$config$time
   expect_equal(tp$span_label, "Haul")
-  expect_equal(rr_time(d, span = "haul")$config$time$span_label, "haul")
+  expect_equal(rr_time(d, speed, by = vid, span = "haul")$config$time$span_label, "haul")
   e1 <- d[d$vid == "EX_1", ]
   e1 <- e1[order(e1$time), ]
   runs <- rle(ifelse(is.na(e1$haul), "", e1$haul))
@@ -1696,13 +1428,13 @@ test_that("a time panel's spans: the whole series of raw pings, or a column's ru
   d2 <- d
   mid <- which(d2$vid == "EX_1" & d2$time == e1$time[first + 1])
   d2$haul[mid] <- NA
-  sp2 <- rr_time(d2, span = "haul")$config$time$vessels[[1]]$spans
+  sp2 <- rr_time(d2, speed, by = vid, span = "haul")$config$time$vessels[[1]]$spans
   expect_equal(length(sp2), length(sp))
-  s2 <- jsonlite::fromJSON(get(.rr_map_app(rr_time(d2, span = "haul")), "/time", "v=EX_1&span=s1")$body)
+  s2 <- jsonlite::fromJSON(get(.rr_map_app(rr_time(d2, speed, by = vid, span = "haul")), "/time", "v=EX_1&span=s1")$body)
   expect_equal(s2$t, as.numeric(e1$time[first:last]))
   # a state's values come and go: their spans overlap, which is said
-  expect_message(rr_time(d, span = "behaviour"), "belongs in `lanes`")
-  expect_no_message(rr_time(d, span = "haul"))
+  expect_message(rr_time(d, speed, by = vid, span = "behaviour"), "belongs in `lanes`")
+  expect_no_message(rr_time(d, speed, by = vid, span = "haul"))
   # a table's intervals, with a label column; an interval that holds no ping is left out
   tab <- data.frame(
     vid = c("EX_1", "EX_1", "EX_12"),
@@ -1710,35 +1442,35 @@ test_that("a time panel's spans: the whole series of raw pings, or a column's ru
     end = c(min(e1$time) + 3600, as.POSIXct("2000-01-02", tz = "UTC"), max(d$time[d$vid == "EX_12"])),
     trip = c("t1", "none", "t2")
   )
-  tp <- rr_time(d, span = list(data = tab, label = "trip"))$config$time
+  tp <- rr_time(d, speed, by = vid, span = list(data = tab, label = "trip"))$config$time
   expect_equal(tp$span_label, "Span")
   # a table named as a column is: list(trips = <table or spec>)
-  tn <- rr_time(d, span = list(trips = list(data = tab, label = "trip")))$config$time
+  tn <- rr_time(d, speed, by = vid, span = list(trips = list(data = tab, label = "trip")))$config$time
   expect_equal(tn$span_label, "trips")
   expect_equal(tn$vessels[[1]]$spans, tp$vessels[[1]]$spans)
-  expect_equal(rr_time(d, span = list(trips = tab))$config$time$span_label, "trips")
+  expect_equal(rr_time(d, speed, by = vid, span = list(trips = tab))$config$time$span_label, "trips")
   expect_equal(vapply(tp$vessels[[1]]$spans, `[[`, "", "value"), c("all", "s1"))
   expect_equal(tp$vessels[[1]]$spans[[2]]$n, sum(e1$time <= min(e1$time) + 3600))
   # a vessel over span_max is offered by its spans alone, the latest first; with none, by month
-  tp <- rr_time(d, span = list(data = tab, label = "trip"), span_max = 10000)$config$time
+  tp <- rr_time(d, speed, by = vid, span = list(data = tab, label = "trip"), span_max = 10000)$config$time
   expect_equal(vapply(tp$vessels[[2]]$spans, `[[`, "", "value"), "s1")
   expect_equal(tp$vessels[[2]]$span, "s1")
-  expect_error(rr_time(d, span = "nope"), "`span`: no column nope")
+  expect_error(rr_time(d, speed, by = vid, span = "nope"), "`span`: no column nope")
   # the layers whose features carry the vessel and a time, which the page filters to the vessel and span
-  ml <- d |> .rr_track(behaviour) |> .rr_pings(speed) |> rr_time()
+  ml <- d |> rr_path(group = vid, time = time, colour = behaviour) |> rr_point(colour = speed) |> rr_time(speed)
   expect_equal(
     ml$config$time$layers,
     list(
-      list(id = "path", by = "vid", t0 = "rb_t0", t1 = "rb_t1"),
-      list(id = "pings", by = "vid", t = "rb_t")
+      list(id = "paths", by = "vid", t0 = "rr_t0", t1 = "rr_t1"),
+      list(id = "points", by = "vid", t = "rr_t")
     )
   )
   # their times are the panel's: a track's first and last, a ping's own
   lines <- DBI::dbGetQuery(
     .rr_connection(),
     sprintf(
-      "SELECT vid, min(rb_t0) AS t0, max(rb_t1) AS t1 FROM %s GROUP BY vid ORDER BY vid",
-      attr(ml$layers$path$tiles, "table")
+      "SELECT vid, min(rr_t0) AS t0, max(rr_t1) AS t1 FROM %s GROUP BY vid ORDER BY vid",
+      attr(ml$layers$paths$tiles, "table")
     )
   )
   expect_equal(lines$t0, as.numeric(tapply(d$time, d$vid, min)))
@@ -1748,7 +1480,7 @@ test_that("a time panel's spans: the whole series of raw pings, or a column's ru
 test_that("a bundle carries the time panel's spans, a file each", {
   skip_if_no_spatial()
   d <- time_pings()
-  m <- rr_time(d, speed, span_max = 10000)
+  m <- rr_time(d, speed, by = vid, span_max = 10000)
   dir <- tempfile()
   rr_bundle(m, dir)
   f <- sort(list.files(file.path(dir, "time")))
