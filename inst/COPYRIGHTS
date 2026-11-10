@@ -1,0 +1,34 @@
+rebelrebel is licensed GPL (>= 3). Its code was moved from the R package ramb (GPL (>= 3)) by its author.
+
+The page's libraries, in inst/engine/vendor, each unchanged as published on npm and with its licence beside it:
+
+inst/engine/vendor/maplibre-gl.js, maplibre-gl.css
+  MapLibre GL JS 5.24.0, https://github.com/maplibre/maplibre-gl-js
+  BSD 3-Clause, Copyright (c) 2023, MapLibre contributors (LICENSE-maplibre-gl.txt, which also lists the code it
+  carries from others).
+
+inst/engine/vendor/maplibre-contour.min.js
+  maplibre-contour 0.1.1, https://github.com/onthegomap/maplibre-contour
+  BSD 3-Clause, Copyright (c) 2023, Michael Barry and maplibre-contour contributors (LICENSE-maplibre-contour.txt).
+
+inst/engine/vendor/uPlot.iife.min.js, uPlot.min.css
+  uPlot 1.6.30, https://github.com/leeoniya/uPlot
+  MIT, Copyright (c) 2022 Leon Sorokin (LICENSE-uplot.txt).
+
+The example data, in inst/extdata, made by ramb's data-raw scripts; each file's sources and licence are in its own
+parquet metadata, in data-dict.yaml and on its help page, and their citations, as BibTeX, in REFERENCES.bib:
+
+inst/extdata/dansk.parquet
+inst/extdata/dansk_harbours.parquet
+  From example_data_AIS.csv and the harbours of the ICES Workshop WKSSFGEO, https://github.com/ices-eg/WKSSFGEO.
+  MIT, Copyright (c) 2021 ICES Expert Groups.
+
+inst/extdata/dansk_relief.parquet
+  From ETOPO 2022 15 Arc-Second Global Relief Model (bed elevation), NOAA National Centers for Environmental
+  Information, https://doi.org/10.25921/fd45-gt74, read with the R package marmap. Public domain (U.S. Government
+  work).
+
+inst/extdata/trawlsurvey.parquet
+inst/extdata/trawlsurveytows.parquet
+  The Icelandic spring groundfish survey's vessel tracks and tows (MFRI), as in ramb: MFRI data, shipped by its
+  maintainer at MFRI; the terms are not stated here.

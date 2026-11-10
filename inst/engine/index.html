@@ -1,0 +1,2226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Map</title>
+<!-- rebelrebel's map viewer (rr_map(), rr_serve()): the engine. What it shows comes from its config, which the server
+     writes into the script tag "config" below as it serves the page. -->
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<script src="vendor/maplibre-gl.js"></script>
+<style>
+  /* a sidebar of groups that fold, each layer with its info and, when ticked, its controls and legend under it
+     (after vefsja.is); behind a menu button on a phone */
+  :root { --side: 310px; --bar: #2c5d87; --bar-hover: #234b6d; --line: #dde2e7; --muted: #5f6b76; }
+  html, body { margin: 0; height: 100%; font: 13px/1.35 system-ui, sans-serif; color: #222; background: #fff; }
+  #side { position: absolute; top: 0; bottom: 0; left: 0; width: var(--side); z-index: 3; background: #fff;
+          box-shadow: 1px 0 5px rgba(0,0,0,.2); display: flex; flex-direction: column; }
+  #map { position: absolute; top: 0; bottom: 0; left: var(--side); right: 0; }
+  #side header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #side header h1 { font-size: 15px; margin: 0; flex: 1; }
+  #groups { flex: 1; overflow-y: auto; scrollbar-gutter: stable; }   /* a scrollbar appearing moves nothing */
+  details.group > summary { list-style: none; cursor: pointer; background: var(--bar); color: #fff; padding: 7px 12px;
+                            border-bottom: 1px solid #fff; user-select: none; }
+  details.group > summary::-webkit-details-marker { display: none; }
+  details.group > summary::before { content: "▸"; display: inline-block; width: 1.1em; transition: transform .15s; }
+  details.group[open] > summary::before { transform: rotate(90deg); }
+  details.group > summary:hover { background: var(--bar-hover); }
+  .body { padding: 6px 12px 10px; }
+  .layer + .layer { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 4px; }
+  .layer .head { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .layer .head label { font-weight: 600; }
+  .layer .head .count { flex: 1; color: var(--muted); }
+  .info-btn { border: 0; background: none; color: var(--bar); cursor: pointer; padding: 0 2px; font-size: 15px; }
+  .info { color: #333; background: #f3f5f7; border-radius: 4px; padding: 6px 8px; margin: 2px 0 6px; }
+  .layer.off .when-on { display: none; }
+  .sub { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin: 10px 0 2px; }
+  .row { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+  .row[hidden] { display: none; }
+  .choose { padding: 4px 12px 6px; border-bottom: 1px solid var(--line); }
+  .choose .row button { padding: 1px 7px; }
+  .choose .chips { display: flex; flex-wrap: wrap; gap: 1px 10px; margin: -2px 0 4px 80px; }
+  .choose .chips label { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
+  .row label { width: 74px; color: var(--muted); }
+  .row select, .row input[type=range] { flex: 1; min-width: 0; }
+  .row.colours input[type=color] { width: 34px; height: 22px; padding: 0; border: 1px solid #c8ccd0; background: none; }
+  .row.colours label + input + label { width: auto; margin-left: 10px; }
+  .row label.auto { width: auto; margin-left: 10px; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+  .years select { flex: 1; }
+  .range .val { width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
+  /* the floor and the cap: two handles on one track, the span between them filled */
+  .dual { position: relative; flex: 1; min-width: 0; height: 22px; }
+  .dual::before { content: ""; position: absolute; left: 7px; right: 7px; top: 9px; height: 4px; border-radius: 2px; background: #c8ccd0; }
+  .dual .span { position: absolute; top: 9px; height: 4px; border-radius: 2px; background: #5b7fa3; }
+  .dual input[type=range] { position: absolute; left: 0; top: 0; width: 100%; height: 22px; margin: 0; padding: 0;
+                            background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+  .dual input[type=range]::-webkit-slider-runnable-track { height: 22px; background: none; }
+  .dual input[type=range]::-moz-range-track { background: none; }
+  .dual input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; pointer-events: auto; width: 14px;
+                                                  height: 14px; margin-top: 4px; border-radius: 50%; background: #fff;
+                                                  border: 2px solid #2c5d87; box-sizing: border-box; cursor: pointer; }
+  .dual input[type=range]::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 50%;
+                                              background: #fff; border: 2px solid #2c5d87; box-sizing: border-box; cursor: pointer; }
+  .dual input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(44, 93, 135, .35); }
+  .dual input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px rgba(44, 93, 135, .35); }
+  .dual-vals { display: flex; justify-content: space-between; margin: -4px 0 4px 80px; font-variant-numeric: tabular-nums; }
+  button { font: inherit; padding: 2px 8px; }
+  .legend { margin-top: 8px; }
+  .bar { height: 10px; border-radius: 2px; }
+  #hist { display: block; width: 100%; height: 44px; margin-top: 2px; }
+  .ends { display: flex; justify-content: space-between; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #status { color: #777; padding: 6px 12px; border-top: 1px solid var(--line); min-height: 1.3em; }
+  .about p { margin: 4px 0 8px; }
+  #bases label { display: flex; align-items: center; gap: 6px; margin: 3px 0; cursor: pointer; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 4px 22px; color: var(--muted); }
+  .swatches span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatches i { display: inline-block; width: 14px; height: 10px; }
+  #copylink { border: 0; background: none; cursor: pointer; font-size: 15px; padding: 0 4px; }
+  .langs button { border: 1px solid var(--line); background: #fff; color: var(--muted); padding: 1px 6px; cursor: pointer; }
+  .langs button + button { border-left: 0; }
+  .langs button.on { background: var(--bar); border-color: var(--bar); color: #fff; }
+  #menu, #close { display: none; }
+  /* a feature's label on hover (popup `hover`): light, beside the pointer, never in its way */
+  .rb-hover { pointer-events: none; }
+  .rb-hover .maplibregl-popup-content { padding: 3px 8px; background: rgba(255,255,255,.93); box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+  .rb-hover .maplibregl-popup-tip { display: none; }
+  /* the notes (rr_serve(notes = )): pins on the map, a thread each, listed in their group */
+  #n-add.on { background: var(--bar); color: #fff; border-color: var(--bar); }
+  #n-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; }
+  #n-list li { display: flex; gap: 6px; padding: 3px 2px; cursor: pointer; border-top: 1px solid var(--line); }
+  #n-list li:hover { background: #f3f5f7; }
+  #n-list li i { flex: none; width: 10px; height: 10px; margin-top: 3px; border-radius: 50%; border: 1px solid #fff;
+                 box-shadow: 0 0 0 .5px #666; }
+  #n-list li span { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .note { width: min(300px, 70vw); }
+  /* a feature's verdict (rr_serve(verdicts = )): a button an option, the answer given filled in its colour */
+  .rb-verdict-popup { max-height: min(65vh, 560px); overflow-y: auto; }
+  .verdict { margin: 6px 0 7px; padding: 6px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .verdict .v-opts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .verdict button { border: 1.5px solid var(--vc); background: #fff; color: #222; border-radius: 4px; padding: 2px 8px;
+                    font: inherit; font-size: 12px; cursor: pointer; }
+  .verdict button.on { background: var(--vc); color: #fff; }
+  .verdict button.v-clear { --vc: #888; padding: 2px 6px; }
+  .verdict input { width: 100%; box-sizing: border-box; margin-top: 5px; font: inherit; font-size: 12px; padding: 2px 4px; }
+  .verdict .v-msg { font-size: 11px; color: #666; min-height: 1em; margin-top: 2px; }
+  .verdict .v-q + .v-q { margin-top: 6px; }
+  .verdict .v-ql { font-size: 11px; color: #555; margin-bottom: 2px; }
+  .verdict .v-other { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
+  .verdict .v-other input { margin-top: 0; }
+  .note .entry + .entry { border-top: 1px solid var(--line); margin-top: 5px; padding-top: 4px; }
+  .note .who { color: var(--muted); font-size: 11px; display: flex; gap: 6px; }
+  .note .who { padding-right: 14px; }   /* clear of the popup's close button */
+  .note .who .del { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; font: inherit;
+                    text-decoration: underline dotted; }
+  .note .who .del:hover { color: #b30000; }
+  .note .text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 1px; }
+  .note .under { color: var(--muted); font-size: 11px; margin-top: 3px; }
+  .note textarea { width: 100%; box-sizing: border-box; font: inherit; margin-top: 6px; resize: vertical; }
+  .note .acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+  .note .err { color: #b30000; margin-top: 3px; }
+  /* the time panel (rr_time()): under the map, beside the sidebar */
+  :root { --timeh: clamp(230px, 36vh, 360px); }
+  body.has-time #map { bottom: var(--timeh); }
+  #timep { position: absolute; left: var(--side); right: 0; bottom: 0; height: var(--timeh); z-index: 2; background: #fff;
+           border-top: 1px solid var(--line); display: flex; flex-direction: column; }
+  #timep[hidden] { display: none; }
+  /* its controls are in the sidebar's group "Time"; over the chart only the readout, in the chart's top padding */
+  #t-cols { flex: 1; display: flex; flex-wrap: wrap; gap: 2px 12px; }
+  #t-cols label { width: auto; display: inline-flex; align-items: center; gap: 4px; }
+  #t-marks { flex: 1; display: flex; flex-wrap: wrap; gap: 2px 12px; }
+  .t-mark { display: inline-flex; align-items: center; gap: 5px; }
+  .t-mark i { display: inline-block; width: 4px; height: 12px; }
+  .t-step { padding: 1px 7px; }
+  #t-info { position: absolute; top: 3px; left: 10px; right: 10px; z-index: 1; pointer-events: none; color: #222;
+            font-size: 12px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-variant-numeric: tabular-nums; }
+  #t-chart { flex: 1; min-height: 0; overflow: hidden; }
+  #t-lanes { display: block; width: 100%; flex: none; cursor: pointer; }
+  @media (max-width: 700px) {
+    #map { left: 0; }
+    #side { width: min(330px, 90vw); transform: translateX(-105%); transition: transform .2s; }
+    body.side-open #side { transform: none; }
+    #timep { left: 0; }
+    #menu { display: block; position: absolute; top: 10px; left: 10px; z-index: 2; font-size: 18px; line-height: 1;
+            padding: 6px 10px; background: #fff; border: 0; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+    #close { display: block; border: 0; background: none; font-size: 18px; cursor: pointer; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<section id="timep" hidden>
+  <div id="t-info"></div>
+  <div id="t-chart" data-tt="tDrag"></div>
+  <canvas id="t-lanes" height="0"></canvas>
+</section>
+<button id="menu" data-tt="menu">☰</button>
+<aside id="side">
+  <header><h1></h1>
+    <button id="copylink" data-tt="copyLink">🔗</button>
+    <span class="langs"></span>
+    <button id="close" data-tt="close">✕</button></header>
+  <div id="groups">
+    <!-- the time panel's controls (rr_time()), shown when the map has one -->
+    <details class="group" id="g-time" open hidden>
+      <summary data-t="gTime"></summary>
+      <div class="body">
+        <div class="row"><label for="t-vessel" data-t="tVessel"></label><select id="t-vessel"></select></div>
+        <div class="row" id="t-span-row"><label for="t-span" data-t="tSpan"></label>
+          <button id="t-span-prev" class="t-step" data-tt="chooseBack">‹</button><select id="t-span"></select>
+          <button id="t-span-next" class="t-step" data-tt="chooseNext">›</button></div>
+        <div class="row" id="t-cols-row" hidden><label data-t="tCols"></label><span id="t-cols"></span></div>
+        <div class="row" id="t-marks-row" hidden><label data-t="tMarks"></label><span id="t-marks"></span></div>
+        <div class="row"><button id="t-whole" data-t="tWholeBtn" data-tt="tWholeTip"></button></div>
+      </div>
+    </details>
+    <!-- the notes (rr_serve(notes = )), shown when the server keeps them -->
+    <details class="group" id="g-notes" open hidden>
+      <summary data-t="gNotes"></summary>
+      <div class="body">
+        <div class="row"><button id="n-add" data-t="nAdd" data-tt="nAddTip"></button>
+          <label class="auto"><input type="checkbox" id="n-show" checked><span data-t="nShow"></span></label></div>
+        <div class="swatches" style="margin-left:0">
+          <span><i style="width:9px;height:9px;border-radius:50%;background:#d7301f"></i><span data-t="nWaiting"></span></span>
+          <span><i style="width:9px;height:9px;border-radius:50%;background:#2c5d87"></i><span data-t="nAnswered"></span></span></div>
+        <ol id="n-list"></ol>
+        <div class="info" id="n-file"></div>
+      </div>
+    </details>
+    <details class="group" id="g-base">
+      <summary data-t="gBase"></summary>
+      <div class="body" id="bases"></div>
+    </details>
+    <details class="group about" id="g-about">
+      <summary data-t="gAbout"></summary>
+      <div class="body" id="about"></div>
+    </details>
+  </div>
+  <div id="status"></div>
+</aside>
+<!-- a grid layer's colour controls and legend, put under its filters -->
+<template id="grid-colour">
+  <div class="sub" data-t="colour"></div>
+  <div class="row"><label for="palette" data-t="colours"></label><select id="palette"></select></div>
+  <div class="row"><label for="stretch" data-t="stretch"></label>
+    <select id="stretch" data-tt="stretchTip">
+      <option value="even" data-t="sEven"></option>
+      <option value="equal" data-t="sEqual"></option>
+    </select></div>
+  <div class="row range"><label for="lo"><span data-t="floor"></span> – <span data-t="cap"></span></label><div class="dual"><i class="span"></i><input id="lo" type="range" min="-4" max="5" step="any"><input id="hi" type="range" min="-4" max="5" step="any"></div></div>
+  <div class="dual-vals"><span id="loval"></span><span id="hival"></span></div>
+  <div class="row range"><label for="opacity" data-t="opacity"></label><input id="opacity" type="range" min="0" max="100" step="1"><span class="val" id="opval"></span></div>
+  <div class="row"><button id="fit" data-t="fit" data-tt="fitTip"></button></div>
+  <div class="legend" data-tt="legendTip">
+    <div class="bar" id="bar"></div><canvas id="hist"></canvas><div class="ends"><span id="lolab"></span><span id="midlab"></span><span id="hilab"></span></div></div>
+</template>
+<script id="config" type="application/json">__CONFIG__</script>
+<script id="bundle" type="application/json">__BUNDLE__</script>
+<script>
+// The engine's version: rr_serve() sends its own in /meta, and a server older than the page is named as such
+const ENGINE = 7;
+// The engine's texts, in English; a config adds languages and the texts of its layers ({1}, {2} filled in here)
+const ENGINE_TEXTS = {
+  menu: "Layers and filters", close: "Close", copyLink: "Copy a link to this view", copied: "link copied",
+  notCopied: "the browser refused to copy the link", infoTip: "About this layer", gBase: "Base map", gAbout: "About",
+  shMethod: "Shading", shStandard: "standard", shBasic: "basic", shCombined: "combined", shIgor: "igor (soft)",
+  shMulti: "several lights", shDirection: "Light from", shAltitude: "Light height", shIntensity: "Intensity",
+  shShadow: "Shadow", shHighlight: "Light",
+  cScale: "Scale", cLog: "log", cLinear: "linear", cMode: "Colours as", cRamp: "a ramp", cBands: "bands",
+  cCut: "Shallower than", cNone: "none", cCutAs: "drawn", cClear: "clear", cGrey: "grey",
+  cFitTip: "Floor and cap at the 2nd and 98th percentiles of the values in view", cFitNone: "no values in view to fit to",
+  cEqual: "equal shares", cAuto: "follow the view", kAuto: "levels from the view",
+  kAutoTip: "About a dozen lines at round values near the view's quantiles, so they fall where the area is; unticked, the fixed spacing",
+  sAuto: "intensity from the view", sAutoTip: "The intensity fitted to the view's relief each time the map settles: stronger where the seabed is gentle; setting it by hand stops it", cAutoTip: "Fit the floor and cap to the view each time it settles; setting either by hand stops it",
+  loading: "loading tiles…", zoom: "zoom", refused: "the server refused tiles (HTTP {1})",
+  older: "the server is an older version ({1}) than this page ({2}): restart it", colour: "Colour",
+  colours: "Colours", stretch: "Stretch", stretchTip: "How the colours are spread between floor and cap",
+  sEven: "even on a log scale", sEqual: "equal shares of the cells in view", floor: "Floor", cap: "Cap",
+  opacity: "Opacity", fit: "Fit to view", fitTip: "Floor and cap at the 2nd and 98th percentiles of the cells in view",
+  chooseAll: "all", chooseAllTip: "Show every value", chooseBack: "The previous one", chooseNext: "The next one",
+  legendTip: "The colour scale on a log axis, and below it the cells in view: values below the floor and above the cap in the end bars",
+  yes: "yes", no: "no",
+  gTime: "Time", tVessel: "Vessel", tSpan: "Span", tCols: "Columns", tMarks: "Marks", tWholeBtn: "Whole span", tWholeTip: "Show the whole span; a double click on the chart does the same",
+  tWhole: "whole ({1})", tLoading: "loading the vessel's pings…", tFailed: "the pings did not come: {1}",
+  tWindow: "{1} to {2}{3} · {4} pings", tThinned: "1 in {1} drawn on the map", tNone: "no pings in this span",
+  tDrag: "Drag across the chart to choose a time; double click for the whole span",
+  gNotes: "Notes", nAdd: "Add a note", nAddTip: "Then click the map where the note belongs (Esc to stop)",
+  nPlace: "Click the map…", nShow: "show", nWaiting: "waiting for an answer", nAnswered: "answered",
+  nFile: "Saved by the server to {1}.", nNone: "No notes yet.", nPlaceholder: "A note on this place",
+  nReplyPlaceholder: "A reply", nSave: "Save", nReply: "Reply", nCancel: "Cancel", nDelete: "delete",
+  nDeleteThread: "Delete note {1} and its replies?", nDeleteOne: "Delete this reply?", nOn: "On: {1}",
+  nFailed: "not saved: {1}", nReader: "you", nReplies: "{1} replies", nReply1: "1 reply",
+  vClear: "Withdraw this answer", vNote: "A note on it (Enter or ✓ saves it)", vSaved: "saved",
+  vFailed: "not saved: {1}", vOther: "Which? (Enter or ✓)", vOtherNeeded: "give the name first"
+};
+let CONFIG;
+try { CONFIG = JSON.parse(document.getElementById("config").textContent); }
+catch (err) {
+  document.body.innerHTML = "<p style='padding:2em'>The server did not send the page's config: restart it (an older " +
+                            "server may be running).</p>";
+  throw err;
+}
+// the engine's texts, then the base maps' labels (key b_<id>), then the config's texts over both
+const PALETTES = CONFIG.palettes, BASEMAPS = CONFIG.basemaps;
+// the grid offers the palettes for its use (or with no use given); a dem layer's colour its own list (colour.palettes)
+const GRID_PALETTES = PALETTES.filter(p => !p.use || p.use.includes("grid")).length
+  ? PALETTES.filter(p => !p.use || p.use.includes("grid")) : PALETTES;
+const layerPalettes = l => (l.colour?.palettes ?? PALETTES.map(p => p.id)).map(id => PALETTES.find(p => p.id === id)).filter(Boolean);
+// Two range inputs on one track (.dual), the floor's and the cap's: neither handle passes the other, the span between
+// them is filled, and the floor's lies on top where both stand at the high end, so it can be drawn back. Returns the
+// drawing, for values set by code
+function dualTrack(lo, hi) {
+  const span = lo.parentElement.querySelector(".span");
+  const draw = () => {
+    const mn = +lo.min, mx = +lo.max, f = v => (Math.min(mx, Math.max(mn, v)) - mn) / (mx - mn || 1);
+    const a = f(+lo.value), b = f(+hi.value);
+    span.style.left = `calc(7px + (100% - 14px) * ${Math.min(a, b)})`;
+    span.style.width = `calc((100% - 14px) * ${Math.abs(b - a)})`;
+    lo.style.zIndex = a > 0.5 ? 2 : "";
+  };
+  lo.addEventListener("input", () => { if (+lo.value > +hi.value) lo.value = hi.value; draw(); });
+  hi.addEventListener("input", () => { if (+hi.value < +lo.value) hi.value = lo.value; draw(); });
+  return draw;
+}
+const duals = {};   // the drawing of each pair, by its floor's input id
+const T = {};
+const addText = (k, v) => { T[k] = { ...T[k], ...(typeof v === "string" ? { en: v } : v) }; };
+for (const [k, v] of Object.entries(ENGINE_TEXTS)) addText(k, v);
+for (const b of BASEMAPS) addText("b_" + b.id, b.label ?? b.id);
+for (const [k, v] of Object.entries(CONFIG.texts ?? {})) addText(k, v);
+const LANGS = CONFIG.languages ?? ["en"];
+const LAYERS = CONFIG.layers, OTHER = LAYERS.filter(l => l.kind !== "grid");
+const G = LAYERS.find(l => l.kind === "grid");   // one grid layer at most, with the colour controls
+const SOURCES = new Set(LAYERS.map(l => l.id));    // each layer's source is named by its id
+const DEM = new Set(LAYERS.filter(l => l.kind === "dem").map(l => l.id));   // elevations, drawn under a grid
+const CONTOUR = new Set(LAYERS.filter(l => l.kind === "contour").map(l => l.id));   // over them, under the labels
+// The time panel (rr_time()), if the map has one; its sources are the page's, kept over a change of base map
+const TP = CONFIG.time ?? null;
+let TS = null, TU = null, TW = null;   // the vessel's span as loaded, its chart, and the window [from, to] in seconds
+if (TP) for (const id of ["rb-time-line", "rb-time-pts", "rb-time-hover"]) SOURCES.add(id);
+// A bundle (rr_bundle()): the page opened as a file, with no server. Its meta is here; its tiles and data are script
+// files beside it, each handing its value to RB_BUNDLE(), since a page opened as a file may load a script where it may
+// not fetch(). Tiles go to MapLibre through the bundle:// protocol; layers on the same tiles share their folder
+const BUNDLE = JSON.parse(document.getElementById("bundle")?.textContent || "null");
+const bundleWait = {};
+window.RB_BUNDLE = (key, v) => { if (bundleWait[key]) bundleWait[key].v = v; };
+function bundleLoad(key) {
+  bundleWait[key] ??= { p: new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    const done = () => {
+      s.remove();
+      const w = bundleWait[key];
+      delete bundleWait[key];
+      if (w && "v" in w) resolve(w.v); else reject(new Error("not in the bundle: " + key));
+    };
+    s.onload = done; s.onerror = done;
+    s.src = key + ".js";
+    document.head.append(s);
+  }) };
+  return bundleWait[key].p;
+}
+const fromBase64 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+const bundleTiles = l => `tiles/${BUNDLE.tiles?.[l.id] ?? l.id}`;
+if (BUNDLE) maplibregl.addProtocol("bundle", async p => ({ data: fromBase64(await bundleLoad(p.url.slice("bundle://".length))) }));
+// The notes (rr_serve(notes = )): only from a server that keeps them, never in a bundle. A thread's pin is red while
+// its last word is the reader's, blue once answered
+const NOTES = !BUNDLE && CONFIG.notes ? CONFIG.notes : null;
+const VERDICTS = !BUNDLE && CONFIG.verdicts ? CONFIG.verdicts : null;
+if (NOTES) SOURCES.add("rb-notes");
+const N_WAIT = "#d7301f", N_DONE = "#2c5d87";
+let noting = false, notes = [], notePopup = null, noteShown = null;   // placing a note; the notes; the thread shown
+// a layer's tiles: the server's, or the bundle's
+const layerTiles =(l, ext, v) => BUNDLE ? `bundle://${bundleTiles(l)}/{z}/{x}/{y}` : `${location.origin}/tiles/${l.id}/{z}/{x}/{y}.${ext}?v=${v}`;
+// A bundle's grid (rr_bundle()'s `grids`): its rows by cell at a few cell sizes, in blocks of cells. Each tile the
+// map asks for is made here, as its server would: the blocks under it at the size that makes a cell one to two screen
+// pixels (the `px` filter times that), their rows kept by the filters in the tile's address and summed by cell, sent
+// as a vector tile with the server's fields. The blocks read are kept, 256 MB at most, the least recently used let go
+const GRID = (G && BUNDLE?.grids?.[G.id]) || null;
+const gridBlocks = new Map();
+let gridBytes = 0;
+function gridBlock(L, b) {
+  const key = `grids/${G.id}/${L}/${b}`, hit = gridBlocks.get(key);
+  if (hit) { gridBlocks.delete(key); gridBlocks.set(key, hit); return hit.p; }
+  const e = {};
+  e.p = bundleLoad(key).then(async s => {
+    const buf = await new Response(new Blob([fromBase64(s)]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer();
+    const n = new DataView(buf).getUint32(0, true);
+    let o = 4;
+    const sums = GRID.sums.map(() => { const a = new Float32Array(buf, o, n); o += 4 * n; return a; });
+    const cell = new Uint16Array(buf, o, n), codes = {};
+    o += 2 * n;
+    for (const c of GRID.columns) if (c.bytes === 2) { codes[c.id] = new Uint16Array(buf, o, n); o += 2 * n; }
+    for (const c of GRID.columns) if (c.bytes === 1) { codes[c.id] = new Uint8Array(buf, o, n); o += n; }
+    e.bytes = buf.byteLength;
+    gridBytes += e.bytes;
+    for (const [k, v] of gridBlocks) {
+      if (gridBytes <= 256e6 || v === e) break;
+      if (v.bytes) { gridBlocks.delete(k); gridBytes -= v.bytes; }
+    }
+    return { n, sums, cell, codes };
+  }).catch(err => { gridBlocks.delete(key); throw err; });
+  gridBlocks.set(key, e);
+  return e.p;
+}
+async function gridTile(url) {
+  const m = url.match(/\/(\d+)\/(\d+)\/(\d+)(?:\?(.*))?$/), z = +m[1], x = +m[2], y = +m[3], q = new URLSearchParams(m[4] ?? "");
+  const px = Math.max(0.25, +(GRID.px ? q.get(GRID.px) : 1) || 1);
+  const target = 360 / 2 ** z / 512 * px / GRID.unit * 2;
+  const L = [...GRID.levels].reverse().find(l => l <= target) ?? GRID.levels[0];
+  const side = L * GRID.unit, n = 2 ** z, B = GRID.block, S = GRID.sums.length;
+  const lon0 = x / n * 360 - 180, lon1 = (x + 1) / n * 360 - 180;
+  const latOf = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
+  const lat0 = latOf(y + 1), lat1 = latOf(y);
+  const cx0 = Math.floor(lon0 / side) - 1, cx1 = Math.floor(lon1 / side) + 1;
+  const cy0 = Math.floor(lat0 / side) - 1, cy1 = Math.floor(lat1 / side) + 1;
+  const W = cx1 - cx0 + 1, H = cy1 - cy0 + 1;
+  // the codes each filter keeps, or none where it keeps all: a range between its two values, a list of values, an
+  // empty value all of them, or a filter with no "all" its default
+  const keep = GRID.columns.map(c => {
+    const f = G.filters.find(g => g.id === c.id);
+    if (c.range) {
+      const [p1, p2] = f.params;
+      if (!q.has(p1) || !q.has(p2)) return null;
+      const a = Math.min(+q.get(p1), +q.get(p2)), b = Math.max(+q.get(p1), +q.get(p2));
+      return Uint8Array.from(c.values, v => v !== null && +v >= a && +v <= b);
+    }
+    let v = q.get(c.id) ?? "";
+    if (v === "" && !f.meta && !(f.options ?? []).some(o => o.value === "")) v = String(f.default ?? f.options?.[0]?.value ?? "");
+    if (v === "") return null;
+    const set = new Set(v.split(","));
+    return Uint8Array.from(c.values, x => x !== null && set.has(x));
+  });
+  const want = new Set(GRID.blocks[L] ?? []), jobs = [];
+  for (let bx = Math.floor(cx0 / B); bx <= Math.floor(cx1 / B); bx++)
+    for (let by = Math.floor(cy0 / B); by <= Math.floor(cy1 / B); by++) if (want.has(`${bx}_${by}`)) jobs.push([bx, by]);
+  const blocks = await Promise.all(jobs.map(([bx, by]) => gridBlock(L, `${bx}_${by}`)));
+  const acc = new Float64Array(W * H * S), seen = new Uint8Array(W * H);
+  blocks.forEach((b, j) => {
+    const tests = GRID.columns.map((c, i) => keep[i] && [b.codes[c.id], keep[i]]).filter(Boolean);
+    const ox = jobs[j][0] * B - cx0, oy = jobs[j][1] * B - cy0;
+    for (let i = 0; i < b.n; i++) {
+      const gx = ox + b.cell[i] % B, gy = oy + ((b.cell[i] / B) | 0);
+      if (gx < 0 || gx >= W || gy < 0 || gy >= H) continue;
+      let pass = true;
+      for (const [codes, mask] of tests) if (!mask[codes[i]]) { pass = false; break; }
+      if (!pass) continue;
+      const at = gy * W + gx;
+      seen[at] = 1;
+      for (let s = 0; s < S; s++) acc[at * S + s] += b.sums[s][i];
+    }
+  });
+  // each cell a rectangle in the tile's units (4,096, 64 beyond its edges), its fields a sum or a sum per km²
+  const ext = 4096, clamp = v => Math.max(-64, Math.min(ext + 64, v));
+  const merc = lat => Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)), mN = merc(lat1), mS = merc(lat0);
+  const tx = lon => clamp(Math.round((lon - lon0) / (lon1 - lon0) * ext)), ty = lat => clamp(Math.round((mN - merc(lat)) / (mN - mS) * ext));
+  const names = Object.keys(GRID.fields), from = names.map(k => [GRID.sums.indexOf(GRID.fields[k][0]), GRID.fields[k][1] === "km2"]);
+  const feats = [];
+  for (let gy = 0; gy < H; gy++) {
+    const la0 = (cy0 + gy) * side, la1 = la0 + side, top = ty(la1), bottom = ty(la0);
+    if (top === bottom) continue;
+    const km2 = side * 111.32 * Math.cos((la0 + la1) / 2 * Math.PI / 180) * side * 110.574;
+    for (let gx = 0; gx < W; gx++) {
+      const at = gy * W + gx;
+      if (!seen[at]) continue;
+      const left = tx((cx0 + gx) * side), right = tx((cx0 + gx + 1) * side);
+      if (left === right) continue;
+      feats.push([left, top, right, bottom, from.map(([s, per]) => per ? acc[at * S + s] / km2 : acc[at * S + s])]);
+    }
+  }
+  return mvtRectangles(GRID.layer, names, feats);
+}
+// A vector tile of one layer of rectangles, each [left, top, right, bottom, values] in tile units, its values doubles
+function pbfWriter() {
+  let buf = new Uint8Array(256), pos = 0;
+  const grow = n => { if (pos + n > buf.length) { const b = new Uint8Array(Math.max(2 * buf.length, pos + n)); b.set(buf.subarray(0, pos)); buf = b; } };
+  const w = {
+    reset() { pos = 0; },
+    varint(v) { grow(10); while (v > 127) { buf[pos++] = (v % 128) | 128; v = Math.floor(v / 128); } buf[pos++] = v; },
+    double(v) { grow(8); new DataView(buf.buffer).setFloat64(pos, v, true); pos += 8; },
+    field(tag, bytes) { w.varint(tag); w.varint(bytes.length); grow(bytes.length); buf.set(bytes, pos); pos += bytes.length; },
+    view() { return buf.subarray(0, pos); }
+  };
+  return w;
+}
+function mvtRectangles(name, keys, feats) {
+  const layer = pbfWriter(), feat = pbfWriter(), part = pbfWriter(), text = new TextEncoder();
+  const zz = v => (v << 1) ^ (v >> 31), index = new Map(), values = [];
+  layer.varint(15 << 3); layer.varint(2);
+  layer.field(1 << 3 | 2, text.encode(name));
+  for (const [x0, y0, x1, y1, vals] of feats) {
+    feat.reset(); part.reset();
+    vals.forEach((v, k) => {
+      let i = index.get(v);
+      if (i === undefined) { i = values.length; index.set(v, i); values.push(v); }
+      part.varint(k); part.varint(i);
+    });
+    feat.field(2 << 3 | 2, part.view());
+    feat.varint(3 << 3); feat.varint(3);
+    part.reset();
+    for (const v of [9, zz(x0), zz(y0), 26, zz(x1 - x0), 0, 0, zz(y1 - y0), zz(x0 - x1), 0, 15]) part.varint(v);
+    feat.field(4 << 3 | 2, part.view());
+    layer.field(2 << 3 | 2, feat.view());
+  }
+  for (const k of keys) layer.field(3 << 3 | 2, text.encode(k));
+  for (const v of values) { part.reset(); part.varint(3 << 3 | 1); part.double(v); layer.field(4 << 3 | 2, part.view()); }
+  layer.varint(5 << 3); layer.varint(4096);
+  const tile = pbfWriter();
+  tile.field(3 << 3 | 2, layer.view());
+  return tile.view().slice().buffer;
+}
+if (GRID) maplibregl.addProtocol("bundle-grid", async p => ({ data: await gridTile(p.url) }));
+// maplibre-contour, pinned as MapLibre is, loaded only for a map with contours
+let contourLib = null;
+const loadContour = () => contourLib ??= new Promise((resolve, reject) => {
+  const s = document.createElement("script");
+  s.src = "vendor/maplibre-contour.min.js";
+  s.onload = () => window.mlcontour ? resolve(window.mlcontour) : reject(new Error("maplibre-contour"));
+  s.onerror = reject;
+  document.head.append(s);
+});
+
+const $ = id => document.getElementById(id);
+let LANG = LANGS.includes(CONFIG.language) ? CONFIG.language : LANGS.includes("en") ? "en" : LANGS[0];
+let addressRead = false, userColour = false, addressTimer = 0;
+const counts = {};      // a layer's features, for the text beside it; -1 when the server has none of them
+let FONT = ["Open Sans Regular"];   // the first style's label font, for the layers' labels on any base map
+const tr = (k, ...a) => a.reduce((t, v, i) => t.replaceAll(`{${i + 1}}`, v), T[k]?.[LANG] ?? T[k]?.en ?? k);
+// A language's number format: the first of the config's locales for it that the browser has (a browser may lack one)
+const loc = () => (CONFIG.locales?.[LANG] ?? [LANG]).find(l => Intl.NumberFormat.supportedLocalesOf([l]).length) ?? LANG;
+const fmt = v => v >= 100 ? Math.round(v).toLocaleString(loc())
+  : v >= 1 ? v.toLocaleString(loc(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  : (+v.toPrecision(2)).toLocaleString(loc(), { maximumSignificantDigits: 2 });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let fitted = false, popup = null, tileError = "", gridMeta = {};
+let viewVals = [];   // log10 of the metric in the cells in view, sorted, from the last fit
+let histVals = [];   // the same, for the histogram, from the last time the map settled
+
+// The sidebar ---------------------------------------------------------------------------------------------------------
+// A layer's row: its checkbox, label, count and ⓘ, its info, and under it when on the grid's controls or the legend
+const legendHtml = legend => legend.map(x => `<span>${swatch(x.swatch)}<span data-t="${x.label}"></span></span>`).join("");
+const swatch = w => w.dot
+  ? `<i style="width:8px;height:8px;border-radius:50%;background:${w.dot};border:1px solid #fff;box-shadow:0 0 0 .5px ${w.stroke ?? w.dot}"></i>`
+  : `<i style="background:${w.fill};border:1.2px solid ${w.stroke ?? w.fill}"></i>`;
+// A grid filter: a select of its options (some from /meta), a range of two selects (from /meta), or the metric
+function filterRow(f) {
+  if (f.type === "range")
+    return `<div class="row years"><label data-t="${f.label}"></label><select id="${f.params[0]}"></select><span>–</span>` +
+           `<select id="${f.params[1]}"></select></div>`;
+  const opts = f.type === "metric" ? G.metrics.map(m => ({ value: m.field, label: m.label })) : f.options ?? [];
+  const id = f.type === "metric" ? "metric" : f.id;
+  return `<div class="row"><label for="${id}" data-t="${f.label}"></label><select id="${id}">` +
+         opts.map(o => `<option value="${esc(o.value)}" data-t="${o.label}"${o.tip ? ` data-tt="${o.tip}"` : ""}` +
+                       `${o.value === f.default ? " selected" : ""}></option>`).join("") + "</select></div>";
+}
+// A dem layer's relief: its shading's method, light, intensity, opacity and colours, each applied as it moves
+const SHADE_METHODS = [["standard", "shStandard"], ["basic", "shBasic"], ["combined", "shCombined"], ["igor", "shIgor"],
+                       ["multidirectional", "shMulti"]];
+const SHADE_RANGES = { dir: [0, 359, 1, "shDirection"], alt: [0, 90, 1, "shAltitude"], ex: [0, 1, 0.05, "shIntensity"],
+                       op: [0, 100, 1, "opacity"] };
+const shadeDefaults = l => ({ method: l.shade.method, dir: l.shade.direction, alt: l.shade.altitude,
+                              ex: l.shade.exaggeration, op: l.shade.opacity, shadow: l.shade.shadow, light: l.shade.highlight });
+function shadeHtml(l) {
+  const d = shadeDefaults(l), id = k => `${l.id}-${k}`;
+  return `<div class="when-on"><div class="row"><label for="${id("method")}" data-t="shMethod"></label><select id="${id("method")}">` +
+    SHADE_METHODS.map(([v, t]) => `<option value="${v}" data-t="${t}"${v === d.method ? " selected" : ""}></option>`).join("") + "</select></div>" +
+    Object.entries(SHADE_RANGES).map(([k, [lo, hi, step, t]]) =>
+      `<div class="row range"><label for="${id(k)}" data-t="${t}"></label><input id="${id(k)}" type="range" min="${lo}" max="${hi}" ` +
+      `step="${step}" value="${d[k]}"><span class="val" id="${id(k)}val"></span></div>`).join("") +
+    `<div class="row colours"><label for="${id("shadow")}" data-t="shShadow"></label><input id="${id("shadow")}" type="color" value="${d.shadow}">` +
+    `<label for="${id("light")}" data-t="shHighlight"></label><input id="${id("light")}" type="color" value="${d.light}"></div>` +
+    (l.shade.fit ? `<div class="row"><label class="auto"><input type="checkbox" id="${id("auto")}"${l.shade.auto === false ? "" : " checked"}>` +
+                   `<span data-t="sAuto" data-tt="sAutoTip"></span></label></div>` : "") + "</div>";
+}
+const shadeNow = l => ({ method: $(l.id + "-method").value, dir: +$(l.id + "-dir").value, alt: +$(l.id + "-alt").value,
+                         ex: +$(l.id + "-ex").value, op: +$(l.id + "-op").value, shadow: $(l.id + "-shadow").value,
+                         light: $(l.id + "-light").value });
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
+// MapLibre's hillshade has no opacity of its own: it is the alpha of its colours. Several lights are three, 45° apart
+function applyShade(l) {
+  if (!l.shade) return;
+  const v = shadeNow(l), multi = v.method === "multidirectional", a = v.op / 100;
+  const three = x => multi ? [x, x, x] : x;
+  const paint = {
+    "hillshade-method": v.method,
+    "hillshade-illumination-direction": multi ? [v.dir - 45, v.dir, v.dir + 45].map(d => (d + 360) % 360) : v.dir,
+    "hillshade-illumination-altitude": three(v.alt),
+    "hillshade-exaggeration": v.ex,
+    "hillshade-shadow-color": three(rgba(v.shadow, a)),
+    "hillshade-highlight-color": three(rgba(v.light, a)),
+    "hillshade-accent-color": rgba(v.shadow, a)
+  };
+  for (const st of l.style) if (st.type === "hillshade" && map.getLayer(st.id))
+    for (const [k, x] of Object.entries(paint)) map.setPaintProperty(st.id, k, x);
+  $(l.id + "-dirval").textContent = v.dir + "°";
+  $(l.id + "-altval").textContent = v.alt + "°";
+  $(l.id + "-exval").textContent = v.ex.toLocaleString(loc(), { minimumFractionDigits: 2 });
+  $(l.id + "-opval").textContent = v.op + " %";
+}
+// A view's fit: the server's (the layer's `fit`), or in a bundle the browser's from the layer's own tiles in view
+// (bundleFit); it rejects where the view has no values
+async function viewFit(l) {
+  const b = map.getBounds();
+  if (BUNDLE) return bundleFit(l, b);
+  const box = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => v.toFixed(4)).join(",");
+  const r = await fetch(`/fit/${l.id}?bbox=${box}`);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+// A bundle's elevation tile in metres (Terrarium or Mapbox), the last 64 kept
+const demCache = new Map();
+function demTile(l, z, x, y) {
+  const key = `${bundleTiles(l)}/${z}/${x}/${y}`;
+  if (!demCache.has(key)) {
+    demCache.set(key, bundleLoad(key).then(async s => {
+      const img = await createImageBitmap(new Blob([fromBase64(s)]), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+      const c = new OffscreenCanvas(img.width, img.height).getContext("2d", { willReadFrequently: true });
+      c.drawImage(img, 0, 0);
+      const d = c.getImageData(0, 0, img.width, img.height).data, e = new Float32Array(img.width * img.height);
+      const mapbox = l.encoding === "mapbox";
+      for (let i = 0, j = 0; i < e.length; i++, j += 4)
+        e[i] = mapbox ? -10000 + (d[j] * 65536 + d[j + 1] * 256 + d[j + 2]) * 0.1 : d[j] * 256 + d[j + 1] + d[j + 2] / 256 - 32768;
+      return { w: img.width, h: img.height, e };
+    }).catch(() => null));
+    if (demCache.size > 64) demCache.delete(demCache.keys().next().value);
+  }
+  return demCache.get(key);
+}
+// A bundle's fit, by its rules (rr_bundle()'s `fit`), from the layer's tiles at the map's zoom (to their deepest)
+// under the view, every so many pixels for a million at most: the values are the elevations, or the depths below sea
+// level for a colour `of` depth or contours with a negative multiplier, an elevation of `nodata` left out. Floor and
+// cap at the rules' percentiles to two figures, with their quantiles between; a shading's intensity `k` over the
+// slope's `p` percentile in degrees (from each pixel to its east and north neighbours), kept between `min` and `max`
+async function bundleFit(l, b) {
+  const F = BUNDLE.fit ?? {}, S = F.slope ?? {};
+  const z = Math.max(l.minzoom ?? 0, Math.min(l.maxzoom ?? 14, Math.floor(map.getZoom()))), n = 2 ** z;
+  const X = lon => (lon + 180) / 360 * n;
+  const Y = lat => { const r = Math.max(-85.05, Math.min(85.05, lat)) * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n; };
+  let [w, s, e, nn] = [Math.max(-180, b.getWest()), b.getSouth(), Math.min(180, b.getEast()), b.getNorth()];
+  if (l.bounds) [w, s, e, nn] = [Math.max(w, l.bounds[0]), Math.max(s, l.bounds[1]), Math.min(e, l.bounds[2]), Math.min(nn, l.bounds[3])];
+  if (w >= e || s >= nn) throw new Error("no values in view");
+  const x0 = X(w), x1 = X(e), y0 = Y(nn), y1 = Y(s), keys = [];
+  for (let tx = Math.floor(x0); tx <= Math.min(n - 1, Math.floor(x1)); tx++)
+    for (let ty = Math.floor(y0); ty <= Math.min(n - 1, Math.floor(y1)); ty++) keys.push([tx, ty]);
+  const tiles = await Promise.all(keys.map(([tx, ty]) => demTile(l, z, tx, ty)));
+  const sign = l.colour?.of === "depth" || (l.contours?.multiplier ?? 1) < 0 ? -1 : 1;
+  const nodata = F.nodata ?? null, ok = v => nodata === null || v !== nodata;
+  const wantQ = !!(l.colour?.fit || l.contours?.fit), wantS = !!l.shade?.fit;
+  const size = tiles.find(t => t)?.w ?? 512, step = Math.max(1, Math.ceil(Math.sqrt((x1 - x0) * (y1 - y0) * size * size / 1e6)));
+  const vals = [], slopes = [];
+  tiles.forEach((t, k) => {
+    if (!t) return;
+    const [tx, ty] = keys[k];
+    const i0 = Math.max(0, Math.floor((x0 - tx) * t.w)), i1 = Math.min(t.w - 1, Math.floor((x1 - tx) * t.w));
+    const j0 = Math.max(0, Math.floor((y0 - ty) * t.h)), j1 = Math.min(t.h - 1, Math.floor((y1 - ty) * t.h));
+    for (let j = j0; j <= j1; j += step) {
+      // a pixel's side in metres at its latitude
+      const m = 40075016.686 * Math.cos(Math.atan(Math.sinh(Math.PI * (1 - 2 * (ty + (j + 0.5) / t.h) / n)))) / (n * t.w);
+      for (let i = i0; i <= i1; i += step) {
+        const c = t.e[j * t.w + i];
+        if (!ok(c)) continue;
+        if (wantQ && (sign > 0 || c < 0)) vals.push(sign * c);
+        if (wantS && i + 1 < t.w && j > 0) {
+          const ce = t.e[j * t.w + i + 1], cn = t.e[(j - 1) * t.w + i];
+          if (ok(ce) && ok(cn)) slopes.push(Math.atan(Math.hypot((ce - c) / m, (cn - c) / m)) * 180 / Math.PI);
+        }
+      }
+    }
+  });
+  const quant = (a, p) => { const h = (a.length - 1) * p, f = Math.floor(h); return a[f] + (h - f) * (a[Math.min(f + 1, a.length - 1)] - a[f]); };
+  const out = {};
+  if (wantQ && vals.length) {
+    const a = Float64Array.from(vals).sort(), [p0, p1] = F.probs ?? [0.02, 0.98], k = F.n ?? 25;
+    const q = Array.from({ length: k }, (_, i) => quant(a, p0 + (p1 - p0) * i / (k - 1))), two = x => Number(x.toPrecision(2));
+    out.floor = Math.max(1, two(q[0]));
+    out.cap = Math.min(10000, Math.max(out.floor * 1.5, two(q[k - 1])));
+    out.q = q.map(x => Math.round(x * 10) / 10);
+  }
+  if (wantS && slopes.length) {
+    const p = quant(Float64Array.from(slopes).sort(), S.p ?? 0.9);
+    if (p > 0) out.exaggeration = Math.min(S.max ?? 1, Math.max(S.min ?? 0.3, (S.k ?? 2) / p));
+  }
+  if (!Object.keys(out).length) throw new Error("no values in view");
+  return out;
+}
+// the intensity following the view: the server's for the view's relief (the layer's `fit`), each time the map settles
+const shadeTimers = {};
+const shadeFollowing = l => !!l.shade?.fit && !!$(`${l.id}-auto`)?.checked;
+async function followShade(l) {
+  try {
+    const f = await viewFit(l);
+    if (typeof f.exaggeration !== "number" || !shadeFollowing(l)) return;
+    $(`${l.id}-ex`).value = Math.round(f.exaggeration * 20) / 20;
+    applyShade(l); writeAddress();
+  } catch (e) { /* the view keeps its intensity */ }
+}
+// the first view from the address: a value outside a control's range or options is left out
+function readShade(l, q) {
+  const k = x => `${l.id}_${x}`;
+  if (SHADE_METHODS.some(([v]) => v === q.get(k("method")))) $(l.id + "-method").value = q.get(k("method"));
+  for (const [x, [lo, hi]] of Object.entries(SHADE_RANGES)) {
+    const v = q.get(k(x));
+    if (v !== null && v !== "" && +v >= lo && +v <= hi) $(l.id + "-" + x).value = v;
+  }
+  for (const x of ["shadow", "light"]) if (/^[0-9a-f]{6}$/i.test(q.get(k(x)) ?? "")) $(l.id + "-" + x).value = "#" + q.get(k(x)).toLowerCase();
+  // an intensity in the address is kept, unless the address also says to follow the view
+  if (l.shade.fit && (q.get(k("auto")) === "0" || (q.get(k("ex")) && q.get(k("auto")) !== "1"))) $(l.id + "-auto").checked = false;
+}
+// A dem layer's values in colour, its depth (or height): a palette over a floor and a cap on a log or a linear scale, as
+// a ramp or in bands, the shallow end cut clear or grey, an opacity; the colour formula is made anew as a control moves.
+// MapLibre's colour relief interpolates between stops, so bands are pairs of stops a centimetre apart
+const CLEAR = "rgba(0,0,0,0)", GREY = "rgba(150,150,150,0.75)", EPS = 0.01;
+const COLOUR_KEYS = ["pal", "lo", "hi", "scale", "mode", "cut", "cutas", "op"];
+const colourDefaults = l => ({ pal: l.colour.palette ?? layerPalettes(l)[0]?.id ?? PALETTES[0].id, lo: l.colour.floor,
+                               hi: l.colour.cap, scale: l.colour.scale, mode: l.colour.mode, cut: l.colour.cut,
+                               cutas: l.colour.cut_as, op: l.colour.opacity });
+function colourHtml(l) {
+  const d = colourDefaults(l), id = k => `${l.id}-c${k}`;
+  const sel = (k, t, opts) => `<div class="row"><label for="${id(k)}" data-t="${t}"></label><select id="${id(k)}">` +
+    opts.map(([v, text, raw]) => `<option value="${esc(v)}"${raw ? "" : ` data-t="${text}"`}${String(v) === String(d[k]) ? " selected" : ""}>` +
+                                 `${raw ? esc(text) : ""}</option>`).join("") + "</select></div>";
+  const slider = (k, t, lo, hi, step, v) => `<div class="row range"><label for="${id(k)}" data-t="${t}"></label><input id="${id(k)}" ` +
+    `type="range" min="${lo}" max="${hi}" step="${step}" value="${v}"><span class="val" id="${id(k)}val"></span></div>`;
+  // the floor and the cap on one track of two handles, their values under it
+  const dual = `<div class="row range"><label for="${id("lo")}"><span data-t="floor"></span> – <span data-t="cap"></span></label>` +
+    `<div class="dual"><i class="span"></i><input id="${id("lo")}" type="range" min="0" max="4" step="any" value="${Math.log10(d.lo)}">` +
+    `<input id="${id("hi")}" type="range" min="0" max="4" step="any" value="${Math.log10(d.hi)}"></div></div>` +
+    `<div class="dual-vals"><span id="${id("loval")}"></span><span id="${id("hival")}"></span></div>`;
+  return `<div class="when-on">` + sel("pal", "colours", layerPalettes(l).map(p => [p.id, p.label ?? p.id, true])) + dual +
+    sel("scale", "cScale", [["log", "cLog"], ["linear", "cLinear"], ...(l.colour.fit ? [["equal", "cEqual"]] : [])]) +
+    sel("mode", "cMode", [["ramp", "cRamp"], ["bands", "cBands"]]) +
+    sel("cut", "cCut", l.colour.cuts.map(c => c > 0 ? [c, `${c} m`, true] : [c, "cNone"])) +
+    sel("cutas", "cCutAs", [["clear", "cClear"], ["grey", "cGrey"]]) + slider("op", "opacity", 0, 100, 1, d.op) +
+    (l.colour.fit ? `<div class="row"><button id="${id("fit")}" data-t="fit" data-tt="cFitTip"></button>` +
+                    `<label class="auto"><input type="checkbox" id="${id("auto")}"${l.colour.auto === false ? "" : " checked"}>` +
+                    `<span data-t="cAuto" data-tt="cAutoTip"></span></label></div>` : "") +
+    `<div class="legend"><div class="bar" id="${id("bar")}"></div><div class="swatches" id="${id("bands")}" hidden></div>` +
+    `<div class="ends"><span id="${id("lolab")}"></span><span id="${id("hilab")}"></span></div></div></div>`;
+}
+const colourNow = l => {
+  const g = k => $(`${l.id}-c${k}`);
+  return { pal: g("pal").value, lo: 10 ** +g("lo").value, hi: 10 ** +g("hi").value, scale: g("scale").value,
+           mode: g("mode").value, cut: +g("cut").value, cutas: g("cutas").value, op: +g("op").value };
+};
+const hexRgb = h => { const n = parseInt(h.slice(1, 7), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+// the palette's colour at t in [0, 1], between its stops
+function rampAt(cols, t) {
+  t = Math.min(1, Math.max(0, t));
+  const x = t * (cols.length - 1), i = Math.min(Math.floor(x), cols.length - 2), f = x - i, a = hexRgb(cols[i]), b = hexRgb(cols[i + 1]);
+  return `rgb(${a.map((v, k) => Math.round(v + f * (b[k] - v))).join(",")})`;
+}
+// the stops as [value, colour], the value (depth or height) rising: clear at 0 (land, no value), the cut, then the ramp
+// or the bands, the last colour on to the deepest
+// the view's quantiles from the last fit, by layer, for colours in equal shares
+const colourQ = {};
+function colourStops(l) {
+  const v = colourNow(l), cols = (PALETTES.find(p => p.id === v.pal) ?? PALETTES[0]).colors;
+  const lo = Math.min(v.lo, v.hi), hi = Math.max(v.lo, v.hi), lg = v.scale !== "linear";
+  // equal shares: the quantiles between floor and cap, each step between them an equal share of the values in view
+  // (on a log scale until the first fit brings them)
+  const pts = v.scale === "equal" && colourQ[l.id] ? [lo, ...colourQ[l.id].filter(x => x > lo && x < hi), hi] : null;
+  const tOf = x => {
+    if (pts) {
+      for (let i = 1; i < pts.length; i++) if (x < pts[i]) return Math.max(0, (i - 1 + (x - pts[i - 1]) / (pts[i] - pts[i - 1])) / (pts.length - 1));
+      return 1;
+    }
+    return lg ? (Math.log10(x) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo) || 1) : (x - lo) / (hi - lo || 1);
+  };
+  const s = [[0, CLEAR]], start = v.cut, top = Math.max(hi, 11000);
+  if (v.cut > 0) s.push([EPS, v.cutas === "grey" ? GREY : CLEAR], [v.cut, v.cutas === "grey" ? GREY : CLEAR]);
+  const bands = [];
+  if (v.mode === "bands") {
+    const b = [start, ...l.colour.bands.filter(x => x > start), top];
+    for (let i = 0; i < b.length - 1; i++) {
+      const a = b[i] > 0 ? b[i] : b[i + 1] / 2, c = rampAt(cols, tOf(lg ? Math.sqrt(a * b[i + 1]) : (a + b[i + 1]) / 2));
+      s.push([b[i] + EPS, c], [b[i + 1], c]);
+      bands.push([b[i], i < b.length - 2 ? b[i + 1] : null, c]);
+    }
+  } else {
+    s.push([start + EPS, rampAt(cols, tOf(Math.max(start + EPS, lo)))]);
+    const n = pts ? pts.length - 1 : 24;
+    for (let k = 0; k <= n; k++) {
+      const x = pts ? pts[k] : lg ? 10 ** (Math.log10(lo) + k / n * (Math.log10(hi) - Math.log10(lo))) : lo + k / n * (hi - lo);
+      if (x > s[s.length - 1][0]) s.push([x, rampAt(cols, k / n)]);
+    }
+    if (top > s[s.length - 1][0]) s.push([top, cols[cols.length - 1]]);
+  }
+  return { s, cols, bands, v };
+}
+function applyColour(l) {
+  if (!l.colour) return;
+  const { s, cols, bands, v } = colourStops(l), sign = l.colour.of === "depth" ? -1 : 1;
+  const expr = ["interpolate", ["linear"], ["elevation"], ...s.map(([x, c]) => [sign * x, c]).sort((a, b) => a[0] - b[0]).flat()];
+  for (const st of l.style) if (st.type === "color-relief" && map.getLayer(st.id)) {
+    map.setPaintProperty(st.id, "color-relief-color", expr);
+    map.setPaintProperty(st.id, "color-relief-opacity", v.op / 100);
+  }
+  // depths to two figures, whole metres from 10
+  const dm = x => { const r = +x.toPrecision(2); return r >= 10 ? Math.round(r).toLocaleString(loc()) : fmt(r); };
+  const m = x => `${dm(x)} m`, id = k => `${l.id}-c${k}`;
+  $(id("loval")).textContent = m(v.lo); $(id("hival")).textContent = m(v.hi); $(id("opval")).textContent = v.op + " %";
+  duals[id("lo")]?.();
+  $(id("bar")).hidden = v.mode === "bands"; $(id("bands")).hidden = v.mode !== "bands";
+  $(id("bar")).style.background = `linear-gradient(to right, ${cols.join(",")})`;
+  $(id("lolab")).textContent = v.mode === "bands" ? "" : "≤ " + m(Math.min(v.lo, v.hi));
+  $(id("hilab")).textContent = v.mode === "bands" ? "" : "≥ " + m(Math.max(v.lo, v.hi));
+  $(id("bands")).innerHTML = bands.map(([a, b, c]) => `<span><i style="background:${c}"></i>${b === null ? "> " + m(a) : `${dm(a)}–${m(b)}`}</span>`).join("");
+}
+// Fit to view: the server's floor and cap for the values in the view's box (the layer's `fit`); following the view, it
+// is asked again each time the map settles, and says nothing where the view has no values
+const fitTimers = {};
+const following = l => !!l.colour?.fit && !!$(`${l.id}-cauto`)?.checked;
+// `keep`: the quantiles only, the floor and cap left as they are (not following, colours in equal shares)
+async function fitColour(l, quiet = false, keep = false) {
+  try {
+    const f = await viewFit(l);
+    if (f.q) colourQ[l.id] = f.q;
+    if (!keep) {
+      $(`${l.id}-clo`).value = Math.log10(Math.min(Math.max(1, f.floor), 10000));
+      $(`${l.id}-chi`).value = Math.log10(Math.min(Math.max(1, f.cap), 10000));
+    }
+    applyColour(l); writeAddress();
+  } catch (e) {
+    if (quiet) return;
+    $("status").textContent = tr("cFitNone");
+    setTimeout(() => { $("status").textContent = tileError || zoomText(); }, 2500);
+  }
+}
+// A contour layer's levels from the view: every other of the view's quantiles rounded to a step of 1, 2 or 5 times a
+// power of ten that makes some 40 of its range; the lines are made at that step and kept at those levels. Unticked, the
+// layer's own thresholds and filters
+const contourDem = {}, contourTimers = {};
+const contourFollowing = l => !!l.contours?.fit && !!$(`${l.id}-kauto`)?.checked;
+function contourLevels(q) {
+  const nice = x => { const p = 10 ** Math.floor(Math.log10(x)); return [5, 2, 1].map(m => m * p).find(v => v <= x) ?? p; };
+  const step = Math.max(1, nice(Math.max(q[q.length - 1] - q[0], 1) / 40));
+  const levels = [...new Set(q.filter((_, i) => i % 2 === 0).map(x => Math.round(x / step) * step))].filter(x => x > 0).sort((a, b) => a - b);
+  return { step, levels };
+}
+// Tiles still loading when the lines' address changes are finished with the old one, and keep the old levels' lines:
+// the levels are set once the layer's tiles are in, the latest asked winning. The view's step holds from one zoom out
+// of the view's own: the far zooms' tiles kept for zooming out are not remade at a step that is not theirs
+const contourAsk = {};
+async function setContourLevels(l, step = null, levels = null) {
+  const dem = contourDem[l.id], ask = contourAsk[l.id] = (contourAsk[l.id] ?? 0) + 1;
+  if (!dem) return;
+  while (map.getSource(l.id) && !map.isSourceLoaded(l.id)) {
+    await new Promise(r => map.once("sourcedata", r));
+    if (ask !== contourAsk[l.id]) return;
+  }
+  const src = map.getSource(l.id);
+  if (!src) return;
+  const from = Math.max(0, Math.floor(map.getZoom()) - 1);
+  src.setTiles([dem.contourProtocolUrl({ multiplier: l.contours.multiplier ?? 1, thresholds: step ? { [from]: [step] } : l.contours.thresholds,
+                                         contourLayer: "contours", elevationKey: "ele", levelKey: "level" })]);
+  for (const st of l.style) if (map.getLayer(st.id))
+    map.setFilter(st.id, levels ? ["in", ["get", "ele"], ["literal", levels]] : st.filter ?? null);
+}
+async function followContours(l) {
+  try {
+    const f = await viewFit(l);
+    if (!f.q?.length || !contourFollowing(l)) return;
+    const { step, levels } = contourLevels(f.q);
+    setContourLevels(l, step, levels);
+  } catch (e) { /* the view keeps its lines */ }
+}
+function readColour(l, q) {
+  const k = x => `${l.id}_${x}`, set = (x, v) => { $(`${l.id}-c${x}`).value = v; };
+  if (layerPalettes(l).some(p => p.id === q.get(k("pal")))) set("pal", q.get(k("pal")));
+  for (const x of ["lo", "hi"]) { const v = +q.get(k(x)); if (q.get(k(x)) && v >= 1 && v <= 10000) set(x, Math.log10(v)); }
+  for (const [x, ok] of [["scale", ["log", "linear", ...(l.colour.fit ? ["equal"] : [])]], ["mode", ["ramp", "bands"]], ["cutas", ["clear", "grey"]]])
+    if (ok.includes(q.get(k(x)))) set(x, q.get(k(x)));
+  if (l.colour.cuts.map(String).includes(q.get(k("cut")))) set("cut", q.get(k("cut")));
+  const op = q.get(k("cop")); if (op !== null && op !== "" && +op >= 0 && +op <= 100) set("op", op);
+  // a floor or cap in the address is kept, unless the address also says to follow the view
+  if (l.colour.fit && (q.get(k("auto")) === "0" || ((q.get(k("lo")) || q.get(k("hi"))) && q.get(k("auto")) !== "1")))
+    $(`${l.id}-cauto`).checked = false;
+}
+function layerRow(l) {
+  const row = document.createElement("div");
+  row.className = "layer" + (l.visible ? "" : " off");
+  row.id = "lyr-" + l.id;
+  row.innerHTML = `<div class="head"><input id="${l.id}" type="checkbox"${l.visible ? " checked" : ""}>` +
+    `<label for="${l.id}" data-t="${l.label}"></label><span class="count" id="${l.id}info"></span>` +
+    `<button class="info-btn" data-info="info-${l.id}" data-tt="infoTip">ⓘ</button></div>` +
+    (l.info ? `<div class="info" id="info-${l.id}" data-t="${l.info}" hidden></div>` : "");
+  if (l.kind === "grid") {
+    const box = document.createElement("div");
+    box.className = "when-on";
+    box.innerHTML = (l.filters ?? []).map(filterRow).join("");
+    box.append($("grid-colour").content.cloneNode(true));
+    row.append(box);
+    duals.lo = dualTrack(box.querySelector("#lo"), box.querySelector("#hi"));
+  }
+  if (l.colour) {
+    row.insertAdjacentHTML("beforeend", colourHtml(l));
+    duals[`${l.id}-clo`] = dualTrack(row.querySelector(`#${l.id}-clo`), row.querySelector(`#${l.id}-chi`));
+  }
+  if (l.contours?.fit) row.insertAdjacentHTML("beforeend", `<div class="when-on"><div class="row"><label class="auto">` +
+    `<input type="checkbox" id="${l.id}-kauto"${l.contours.auto === false ? "" : " checked"}><span data-t="kAuto" data-tt="kAutoTip"></span></label></div></div>`);
+  if (l.shade) row.insertAdjacentHTML("beforeend", shadeHtml(l));
+  // the styles to choose between (a vector or geojson layer's variants), and the legend, which a variant may replace
+  if (l.variants) row.insertAdjacentHTML("beforeend", `<div class="when-on"><div class="row">` +
+    `<label for="${l.id}-by" data-t="${esc(l.variants.label ?? "")}"></label><select id="${l.id}-by">` +
+    l.variants.options.map(o => `<option value="${esc(o.value)}" data-t="${esc(o.label)}"></option>`).join("") + "</select></div></div>");
+  // the layer's state, values its styles read: a list to choose from, or a checkbox
+  for (const s of l.state ?? []) row.insertAdjacentHTML("beforeend", `<div class="when-on"><div class="row">` + (s.options
+    ? `<label for="${l.id}-s-${s.id}" data-t="${esc(s.label)}"></label><select id="${l.id}-s-${s.id}">` +
+      s.options.map(o => `<option value="${esc(String(o.value))}"${String(o.value) === String(s.default) ? " selected" : ""}` +
+                         ` data-t="${esc(o.label)}"></option>`).join("") + "</select>"
+    : `<label class="auto"><input type="checkbox" id="${l.id}-s-${s.id}"${s.default ? " checked" : ""}><span data-t="${esc(s.label)}"></span></label>`) +
+    "</div></div>");
+  if (l.legend || l.variants?.options.some(o => o.legend))
+    row.insertAdjacentHTML("beforeend", `<div class="when-on swatches" id="${l.id}-legend">${legendHtml(l.legend ?? [])}</div>`);
+  return row;
+}
+for (const g of CONFIG.groups) {
+  const d = document.createElement("details");
+  d.className = "group"; d.id = "g-" + g.id; d.open = !!g.open;
+  d.innerHTML = `<summary data-t="${g.title}"></summary><div class="body"></div>`;
+  for (const id of g.layers) d.querySelector(".body").append(layerRow(LAYERS.find(l => l.id === id)));
+  $("groups").insertBefore(d, $("g-notes"));
+}
+// The map's choices (a field's values to show, from the data's groups), above the groups: chips that tick on and off
+// for a field of few values (`multi`), a list to show one at a time for one of many; ‹ › step through either
+const CHOOSE = CONFIG.choose?.fields ?? [];
+if (CHOOSE.length) {
+  const box = document.createElement("div");
+  box.className = "choose";
+  box.innerHTML = CHOOSE.map((f, i) => {
+    const head = `<div class="row"><label for="ch-${i}" data-t="${esc(f.label ?? f.field)}"></label>` +
+      `<button data-step="-1" data-ch="${i}" data-tt="chooseBack">‹</button>`;
+    const next = `<button data-step="1" data-ch="${i}" data-tt="chooseNext">›</button>`;
+    if (f.multi) {
+      return head + `<button data-all="${i}" data-t="chooseAll" data-tt="chooseAllTip"></button>` + next + "</div>" +
+        `<div class="chips" id="ch-${i}">` + f.options.map(o => `<label><input type="checkbox" value="${esc(o.value)}" checked>` +
+        `${esc(o.label ?? o.value)}</label>`).join("") + "</div>";
+    }
+    return head + `<select id="ch-${i}"><option value="" data-t="chooseAll"></option>` +
+      f.options.map(o => `<option value="${esc(o.value)}">${esc(o.label ?? o.value)}</option>`).join("") + "</select>" + next + "</div>";
+  }).join("");
+  $("groups").prepend(box);
+}
+// the values chosen of a field, null where every value is shown
+function chosen(i) {
+  const f = CHOOSE[i], el = $("ch-" + i);
+  if (!f.multi) return el.value === "" ? null : [el.value];
+  const on = [...el.querySelectorAll("input")].filter(x => x.checked).map(x => x.value);
+  return on.length === f.options.length ? null : on;
+}
+function setChosen(i, vals) {
+  const f = CHOOSE[i], el = $("ch-" + i);
+  if (!f.multi) { el.value = vals?.[0] ?? ""; return; }
+  for (const x of el.querySelectorAll("input")) x.checked = vals === null || vals.includes(x.value);
+}
+// the time panel's group from the start, so the sidebar does not move when the map has loaded and the panel is set up;
+// its spans named as the map names them (a trip, a voyage), and no list where every vessel has only its whole series
+if (TP) {
+  $("g-time").hidden = false;
+  if (TP.span_label) $("g-time").querySelector('label[for="t-span"]').dataset.t = TP.span_label;
+  $("t-span-row").hidden = TP.vessels.every(v => v.spans.length < 2);
+}
+if (NOTES) $("g-notes").hidden = false;   // from the start, so the sidebar does not move when the notes come
+for (const k of CONFIG.about ?? []) $("about").insertAdjacentHTML("beforeend", `<p data-t="${k}"></p>`);
+if (!(CONFIG.about ?? []).length) $("g-about").hidden = true;
+$("side").querySelector("h1").dataset.t = CONFIG.title;
+if (LANGS.length > 1)
+  for (const l of LANGS) $("side").querySelector(".langs").insertAdjacentHTML("beforeend", `<button data-lang="${l}">${l.toUpperCase()}</button>`);
+if (G) $("opacity").value = G.opacity ?? 85;
+
+// The grid layer: its tiles, colours and histogram -------------------------------------------------------------------
+const metric = () => $("metric")?.value ?? G.metrics[0].field;
+function tileUrl() {
+  const q = new URLSearchParams();
+  for (const f of G.filters ?? []) {
+    if (f.type === "metric") continue;
+    for (const p of f.type === "range" ? f.params : [f.id]) if ($(p).value !== "") q.set(p, $(p).value);
+  }
+  q.set("v", gridMeta.v ?? 0);
+  return GRID ? `bundle-grid://${G.id}/{z}/{x}/{y}?${q}` : `${location.origin}/tiles/${G.id}/{z}/{x}/{y}.pbf?${q}`;
+}
+
+const colors = () => (PALETTES.find(p => p.id === $("palette").value) ?? GRID_PALETTES[0]).colors;
+
+// The colour stops, as [log10 value, colour]: evenly spaced between floor and cap, or at the quantiles of the cells in
+// view that lie between them, so that each colour covers an equal share of those cells
+function stops() {
+  const c = colors(), n = c.length;
+  let lo = +$("lo").value, hi = +$("hi").value;
+  if (hi <= lo) hi = lo + 0.05;
+  let v = c.map((_, i) => lo + i * (hi - lo) / (n - 1));
+  const sub = viewVals.filter(x => x >= lo && x <= hi);
+  if ($("stretch").value === "equal" && sub.length >= 2 * n) {
+    v = c.map((_, i) => sub[Math.min(sub.length - 1, Math.round(i * (sub.length - 1) / (n - 1)))]);
+    for (let i = 1; i < n; i++) v[i] = Math.max(v[i], v[i - 1] + 1e-6);   // interpolate needs rising stops
+  }
+  return v.map((x, i) => [x, c[i]]);
+}
+
+// The colour at log10 value x, as the map draws it: linear in RGB between stops, the end colours beyond them
+function colorAt(x, s) {
+  if (x <= s[0][0]) return s[0][1];
+  for (let i = 1; i < s.length; i++) if (x <= s[i][0]) {
+    const f = (x - s[i - 1][0]) / (s[i][0] - s[i - 1][0]);
+    const a = s[i - 1][1].match(/\w\w/g).map(h => parseInt(h, 16)), b = s[i][1].match(/\w\w/g).map(h => parseInt(h, 16));
+    return `rgb(${a.map((v, k) => Math.round(v + f * (b[k] - v))).join(",")})`;
+  }
+  return s[s.length - 1][1];
+}
+
+function drawHist() {
+  const cv = $("hist"), r = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * r; cv.height = h * r;
+  const g = cv.getContext("2d"); g.scale(r, r); g.clearRect(0, 0, w, h);
+  if (!histVals.length) return;
+  let lo = +$("lo").value, hi = +$("hi").value; if (hi <= lo) hi = lo + 0.05;
+  const nb = 48, n = new Array(nb).fill(0), s = stops();
+  for (const x of histVals) n[Math.max(0, Math.min(nb - 1, Math.floor((x - lo) / (hi - lo) * nb)))]++;
+  const top = Math.max(...n);
+  n.forEach((k, i) => {
+    g.fillStyle = colorAt(lo + (i + 0.5) * (hi - lo) / nb, s);
+    const bh = k ? Math.max(1, k / top * (h - 1)) : 0;
+    g.fillRect(i * w / nb, h - bh, w / nb - 0.5, bh);
+  });
+}
+
+function colorExpr() {
+  // values below the floor take the first colour and above the cap the last: interpolate clamps at its ends
+  return ["interpolate", ["linear"], ["log10", ["max", ["to-number", ["get", metric()]], 1e-9]], ...stops().flat()];
+}
+
+function paint() {
+  if (!G) return;
+  duals.lo?.();
+  $("loval").textContent = fmt(10 ** +$("lo").value);
+  $("hival").textContent = fmt(10 ** +$("hi").value);
+  $("lolab").textContent = "≤ " + fmt(10 ** +$("lo").value);
+  $("hilab").textContent = "≥ " + fmt(10 ** +$("hi").value);
+  $("opval").textContent = `${$("opacity").value} %`;
+  // the bar on the histogram's log axis: each colour where its stop lies
+  const s = stops(), lo = s[0][0], hi = s[s.length - 1][0];
+  $("midlab").textContent = fmt(10 ** ((lo + hi) / 2));
+  $("bar").style.background = `linear-gradient(to right, ${s.map(([x, c]) => `${c} ${(100 * (x - lo) / (hi - lo)).toFixed(1)}%`).join(",")})`;
+  drawHist();
+  if (map.getLayer(G.id)) map.setPaintProperty(G.id, "fill-color", colorExpr());
+}
+
+// The floor and cap sliders reach the values at hand
+function widen(lo, hi) {
+  const a = Math.min(-4, Math.floor(lo)), b = Math.max(5, Math.ceil(hi));
+  for (const id of ["lo", "hi"]) { $(id).min = Math.min(+$(id).min, a); $(id).max = Math.max(+$(id).max, b); }
+}
+
+function fitToView() {
+  const v = map.queryRenderedFeatures({ layers: [G.id] })
+    .map(f => +f.properties[metric()]).filter(x => x > 0).map(Math.log10).sort((a, b) => a - b);
+  if (v.length < 10) return false;
+  viewVals = v;
+  widen(v[0], v[v.length - 1]);
+  const q = p => v[Math.min(v.length - 1, Math.floor(p * v.length))];
+  $("lo").value = q(0.02).toFixed(2);
+  $("hi").value = q(0.98).toFixed(2);
+  paint();
+  return true;
+}
+
+// The map --------------------------------------------------------------------------------------------------------------
+const map = new maplibregl.Map({
+  container: "map",
+  style: BASEMAPS[0].style,
+  center: CONFIG.view.center, zoom: CONFIG.view.zoom, hash: true
+});
+// a page laid out after the map was made (a tab opened in the background) left the canvas at 400 x 300
+new ResizeObserver(() => map.resize()).observe($("map"));
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+map.addControl(new maplibregl.ScaleControl(), "bottom-right");
+// the style's load event, caught once: map.loaded() is false again while any tile loads, so it cannot tell
+const styleLoaded = new Promise(resolve => map.once("load", resolve));
+
+if (G) for (const p of GRID_PALETTES) $("palette").append(new Option(`${p.label}${p.source ? " · " + p.source : ""}`, p.id));
+if (G && CONFIG.palette) $("palette").value = CONFIG.palette;
+for (const b of BASEMAPS)
+  $("bases").insertAdjacentHTML("beforeend",
+    `<label><input type="radio" name="base" value="${b.id}"${b === BASEMAPS[0] ? " checked" : ""}><span data-t="b_${b.id}"></span></label>`);
+
+// The page's language: every [data-t] text and [data-tt] tooltip, then the texts drawn by code
+const zoomText = () => `${tr("zoom")} ${map.getZoom().toLocaleString(loc(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
+function applyLang(l) {
+  LANG = LANGS.includes(l) ? l : LANG;
+  document.documentElement.lang = LANG;
+  document.title = tr(CONFIG.title);
+  for (const el of document.querySelectorAll("[data-t]")) el.textContent = tr(el.dataset.t);
+  for (const el of document.querySelectorAll("[data-tt]")) el.title = tr(el.dataset.tt);
+  for (const b of document.querySelectorAll("[data-lang]")) b.classList.toggle("on", b.dataset.lang === LANG);
+  for (const l of OTHER) countText(l);
+  if (TP && TU) timeLang();
+  if (NOTES) noteList();
+  if (!tileError && G && map.getLayer(G.id)) $("status").textContent = zoomText();   // map.loaded() is false while tiles load
+  popup?.remove();
+  paint();
+  if (addressRead) writeAddress();
+}
+for (const b of document.querySelectorAll("[data-lang]")) b.addEventListener("click", () => applyLang(b.dataset.lang));
+applyLang(new URLSearchParams(location.search).get("lang"));
+
+// A raster base or none has no glyphs of its own: the layers' labels keep the previous style's
+function baseStyle(b) {
+  if (b.style) return b.style;
+  const layers = [{ id: "base-bg", type: "background", paint: { "background-color": "#eef0f2" } }];
+  if (!b.tiles) return { version: 8, sources: {}, layers };
+  return { version: 8, layers: [...layers, { id: "base", type: "raster", source: "base" }],
+           sources: { base: { type: "raster", tiles: [b.tiles], tileSize: 256, maxzoom: b.maxzoom,
+                              attribution: b.attribution ?? "" } } };
+}
+function setBase(id) {
+  const b = BASEMAPS.find(x => x.id === id) ?? BASEMAPS[0];
+  map.setStyle(baseStyle(b), { transformStyle: (prev, next) => {
+    if (!prev) return next;
+    const own = prev.layers.filter(l => SOURCES.has(l.source));
+    const sources = Object.fromEntries(Object.entries(prev.sources).filter(([k]) => SOURCES.has(k)));
+    const i = next.layers.findIndex(l => l.type === "symbol");
+    // elevations and a grid under the base's labels, the other layers over them in their order
+    const under = own.filter(l => DEM.has(l.source) || l.source === G?.id || CONTOUR.has(l.source)),
+          rest = own.filter(l => !under.includes(l));
+    const layers = i < 0 ? [...next.layers, ...under, ...rest]
+                         : [...next.layers.slice(0, i), ...under, ...next.layers.slice(i), ...rest];
+    return { ...next, glyphs: next.glyphs ?? prev.glyphs, sources: { ...next.sources, ...sources }, layers };
+  } });
+}
+$("bases").addEventListener("change", e => { popup?.remove(); setBase(e.target.value); });
+
+// The first view: /meta, then the address ----------------------------------------------------------------------------
+const optionLabel = (f, o) => `${o.name ?? (f.unnamed ? tr(f.unnamed) + " " : "") + o.value}${o.code ? " (" + o.code + ")" : ""}`;
+Promise.all([BUNDLE ? BUNDLE.meta : fetch("/meta").then(r => r.json()), styleLoaded]).then(([meta]) => {
+  const q = new URLSearchParams(location.search);
+  if (G) {
+    gridMeta = meta.layers?.[G.id] ?? {};
+    for (const f of G.filters ?? []) {
+      if (f.type === "range") {
+        const [a, b] = gridMeta.ranges?.[f.id] ?? [];
+        for (let y = a; y <= b; y++) for (const p of f.params) $(p).append(new Option(y, y));
+        $(f.params[0]).value = a; $(f.params[1]).value = b;
+      } else if (f.meta) {
+        const opts = gridMeta.options?.[f.id] ?? [];
+        for (const o of opts) $(f.id).append(new Option(optionLabel(f, o), o.value));
+        // several values, from the address: named by their options' names and codes
+        const v = q.get(f.id);
+        if (v && ![...$(f.id).options].some(o => o.value === v)) {
+          const os = v.split(",").map(x => opts.find(o => String(o.value) === x) ?? { value: x });
+          const codes = [...new Set(os.map(o => o.code).filter(Boolean))];
+          $(f.id).append(new Option(`${os.map(o => o.name ?? (f.unnamed ? tr(f.unnamed) + " " : "") + o.value).join(", ")}` +
+                                    `${codes.length ? " (" + codes.join(", ") + ")" : ""}`, v));
+        }
+      }
+    }
+    $("lo").value = -1; $("hi").value = 2;
+    // the first view from the address: a value the page does not offer is left out
+    const sel = [...(G.filters ?? []).flatMap(f => f.type === "range" ? f.params : [f.type === "metric" ? "metric" : f.id]),
+                 "palette", "stretch"];
+    for (const k of sel) if (q.get(k) !== null && [...$(k).options].some(o => o.value === q.get(k))) $(k).value = q.get(k);
+    for (const f of G.filters ?? []) if (f.type === "range" && +$(f.params[0]).value > +$(f.params[1]).value)
+      [$(f.params[0]).value, $(f.params[1]).value] = [$(f.params[1]).value, $(f.params[0]).value];
+    if (+q.get("floor") > 0 && +q.get("cap") > +q.get("floor")) {
+      widen(Math.log10(+q.get("floor")), Math.log10(+q.get("cap")));
+      $("lo").value = Math.log10(+q.get("floor")); $("hi").value = Math.log10(+q.get("cap"));
+      fitted = userColour = true;   // a floor and cap given are kept, not fitted to the view
+    }
+    if (q.get("opacity") !== null && q.get("opacity") !== "" && +q.get("opacity") >= 0 && +q.get("opacity") <= 100)
+      $("opacity").value = Math.round(+q.get("opacity"));
+  }
+  // a layer on by default is turned off by id=0, one off by default on by id=1
+  for (const l of LAYERS) if (q.get(l.id) === (l.visible ? "0" : "1")) {
+    $(l.id).checked = !l.visible; $("lyr-" + l.id).classList.toggle("off", !$(l.id).checked);
+  }
+  for (const l of OTHER) if (l.variants && l.variants.options.some(o => o.value === q.get(l.id + "_by"))) $(l.id + "-by").value = q.get(l.id + "_by");
+  for (const l of OTHER) for (const s of l.state ?? []) {
+    const v = q.get(stateKey(l, s)), el = $(`${l.id}-s-${s.id}`);
+    if (s.options) { if (s.options.some(o => String(o.value) === v)) el.value = v; }
+    else if (["0", "1"].includes(v)) el.checked = v === "1";
+  }
+  for (const l of OTHER) if (l.shade) readShade(l, q);
+  for (const l of OTHER) if (l.colour) readColour(l, q);
+  for (const l of OTHER) if (l.contours?.fit && ["0", "1"].includes(q.get(l.id + "_auto"))) $(`${l.id}-kauto`).checked = q.get(l.id + "_auto") === "1";
+  CHOOSE.forEach((f, i) => {
+    const vals = (q.get(f.field) ?? "").split(",").filter(v => f.options.some(o => o.value === v));
+    if (vals.length) setChosen(i, f.multi ? vals : vals.slice(0, 1));
+  });
+  FONT = map.getStyle().layers.find(l => l.type === "symbol" && l.layout?.["text-font"])?.layout["text-font"] ?? FONT;
+  if (G) {
+    const firstSymbol = map.getStyle().layers.find(l => l.type === "symbol")?.id;
+    map.addSource(G.id, { type: "vector", tiles: [tileUrl()], minzoom: G.minzoom ?? 2, maxzoom: G.maxzoom ?? 12 });
+    map.addLayer({ id: G.id, type: "fill", source: G.id, "source-layer": G.source_layer ?? "cells",
+                   layout: { visibility: $(G.id).checked ? "visible" : "none" },
+                   paint: { "fill-color": colorExpr(), "fill-opacity": +$("opacity").value / 100, "fill-antialias": false } },
+                 firstSymbol);
+    paint();
+  }
+  for (const l of OTHER) addLayer(l, meta);
+  if (TP) timeSetup(q);
+  if (NOTES) notesSetup();
+  if (VERDICTS) verdictsSetup();
+  const base =BASEMAPS.find(b => b.id === q.get("base"));
+  if (base && base !== BASEMAPS[0]) { document.querySelector(`#bases input[value="${base.id}"]`).checked = true; setBase(base.id); }
+  addressRead = true;
+  addressNow();   // the address as the page took it: a value it does not offer is dropped
+});
+
+// The address ---------------------------------------------------------------------------------------------------------
+// The page's state in its address: every control away from its default; the position is in the hash, MapLibre's.
+// Floor and cap go in only once set by hand or given, so a link without them fits to its own view.
+function addressNow() {
+  if (!addressRead) return;
+  const q = new URLSearchParams();
+  const put = (k, v, d) => { if (v != null && v !== "" && v !== d) q.set(k, v); };
+  if (G) {
+    for (const f of G.filters ?? []) {
+      if (f.type === "range") {
+        const ys = [...$(f.params[0]).options].map(o => o.value);
+        if ($(f.params[0]).value !== ys[0] || $(f.params[1]).value !== ys[ys.length - 1])
+          for (const p of f.params) q.set(p, $(p).value);
+      } else if (f.type === "metric") put("metric", metric(), G.metrics[0].field);
+      else put(f.id, $(f.id).value, f.default ?? f.options?.[0]?.value ?? "");
+    }
+    put("palette", $("palette").value, CONFIG.palette ?? GRID_PALETTES[0].id);
+    put("stretch", $("stretch").value, "even");
+    if (userColour) { q.set("floor", +(10 ** +$("lo").value).toPrecision(3)); q.set("cap", +(10 ** +$("hi").value).toPrecision(3)); }
+    put("opacity", $("opacity").value, String(G.opacity ?? 85));
+  }
+  for (const l of LAYERS) if (!$(l.id).disabled && $(l.id).checked !== !!l.visible) q.set(l.id, $(l.id).checked ? "1" : "0");
+  for (const l of OTHER) if (l.variants) put(l.id + "_by", $(l.id + "-by").value, l.variants.options[0].value);
+  for (const l of OTHER) for (const s of l.state ?? []) {
+    const text = v => s.options ? String(v) : v ? "1" : "0";
+    put(stateKey(l, s), text(stateNow(l, s)), text(s.default));
+  }
+  for (const l of OTHER) if (l.shade) {
+    const v = shadeNow(l), d = shadeDefaults(l);
+    put(l.id + "_method", v.method, d.method);
+    for (const x of Object.keys(SHADE_RANGES)) if (x !== "ex" || !shadeFollowing(l)) put(l.id + "_" + x, String(v[x]), String(d[x]));
+    if (l.shade.fit) put(l.id + "_auto", shadeFollowing(l) ? "1" : "0", l.shade.auto === false ? "0" : "1");
+    for (const x of ["shadow", "light"]) put(l.id + "_" + x, v[x].slice(1), d[x].slice(1));
+  }
+  for (const l of OTHER) if (l.colour) {
+    const v = colourNow(l), d = colourDefaults(l), r = x => String(+x.toPrecision(3));
+    for (const x of ["pal", "scale", "mode", "cutas"]) put(`${l.id}_${x}`, v[x], d[x]);
+    if (!following(l)) { put(`${l.id}_lo`, r(v.lo), r(d.lo)); put(`${l.id}_hi`, r(v.hi), r(d.hi)); }
+    if (l.colour.fit) put(`${l.id}_auto`, following(l) ? "1" : "0", l.colour.auto === false ? "0" : "1");
+    put(`${l.id}_cut`, String(v.cut), String(d.cut)); put(`${l.id}_cop`, String(v.op), String(d.op));
+  }
+  for (const l of OTHER) if (l.contours?.fit) put(`${l.id}_auto`, contourFollowing(l) ? "1" : "0", l.contours.auto === false ? "0" : "1");
+  CHOOSE.forEach((f, i) => put(f.field, chosen(i)?.join(",") ?? "", ""));
+  if (TP && TS) {
+    const v = tVes(), t = TS.t;
+    put("tv", v.value, TP.vessels[0].value);
+    put("tspan", $("t-span").value, v.span);
+    if (TW && t.length && (TW[0] > t[0] || TW[1] < t[t.length - 1])) q.set("tw", `${Math.floor(TW[0])},${Math.ceil(TW[1])}`);
+  }
+  put("base", document.querySelector("#bases input:checked")?.value, BASEMAPS[0].id);
+  put("lang", LANG, LANGS.includes(CONFIG.language) ? CONFIG.language : LANGS.includes("en") ? "en" : LANGS[0]);
+  const qs = q.toString().replace(/%2C/g, ",");
+  history.replaceState(history.state, "", `${location.pathname}${qs ? "?" + qs : ""}${location.hash}`);
+}
+function writeAddress() { clearTimeout(addressTimer); addressTimer = setTimeout(addressNow, 150); }
+$("side").addEventListener("change", writeAddress);
+$("side").addEventListener("input", writeAddress);
+$("copylink").addEventListener("click", () => {
+  addressNow();
+  const say = t => { $("status").textContent = t; setTimeout(() => { $("status").textContent = tileError || zoomText(); }, 2500); };
+  navigator.clipboard.writeText(location.href).then(() => say(tr("copied")), () => say(tr("notCopied")));
+});
+
+// The other layers -----------------------------------------------------------------------------------------------------
+// Vector tiles from the server ("vector", its count from /meta), a GeoJSON file ("geojson", its count from the file) or
+// image tiles of elevations ("dem", a raster-dem source whose styles go under a grid or the base's labels), or contour
+// lines made in the browser from such tiles ("contour", by maplibre-contour, over the elevations, under the labels),
+// drawn by its styles over the base map's labels; a layer the server does not have is disabled, with its "missing" text
+function addLayer(l, meta) {
+  const draw = () => {
+    // elevations go under a grid, or under the base's labels; contours over both, under the labels
+    const firstSymbol = () => map.getStyle().layers.find(x => x.type === "symbol" && !SOURCES.has(x.source))?.id;
+    // the verdicts' marks and the notes' pins stay over every layer, one whose data come after them included
+    const before = DEM.has(l.id) ? (G && map.getLayer(G.id) ? G.id : firstSymbol())
+                 : CONTOUR.has(l.id) ? firstSymbol()
+                 : map.getLayer("rb-verdict-mark") ? "rb-verdict-mark" : map.getLayer("rb-notes-dot") ? "rb-notes-dot" : undefined;
+    applyState(l);   // before the styles that read it
+    for (const st of l.style) {
+      const spec = { ...st, source: l.id };
+      if (spec.type === "symbol" && spec.layout?.["text-field"] && !spec.layout["text-font"]) spec.layout = { ...spec.layout, "text-font": FONT };
+      map.addLayer(spec, before);
+    }
+    applyVariant(l); applyColour(l); applyShade(l); applyChoice(l); showLayer(l); countText(l);
+    if (shadeFollowing(l)) followShade(l);
+    if (following(l)) fitColour(l, true);
+    else if (l.colour?.fit && $(`${l.id}-cscale`).value === "equal") fitColour(l, true, true);
+  };
+  if (l.kind === "vector") {
+    const n = meta.layers?.[l.id]?.count ?? 0;
+    if (!n) return missing(l);
+    counts[l.id] = n;
+    map.addSource(l.id, { type: "vector", tiles: [layerTiles(l, "pbf", meta.layers[l.id].v ?? meta.engine)],
+                          minzoom: l.minzoom ?? 0, maxzoom: l.maxzoom ?? 14 });
+    draw();
+  } else if (l.kind === "dem") {
+    map.addSource(l.id, { type: "raster-dem", encoding: l.encoding ?? "terrarium", tileSize: l.tile_size ?? 512,
+                          tiles: [layerTiles(l, l.format ?? "png", meta.layers?.[l.id]?.v ?? meta.engine)],
+                          minzoom: l.minzoom ?? 0, maxzoom: l.maxzoom ?? 14, ...(l.bounds ? { bounds: l.bounds } : {}) });
+    draw();
+  } else if (l.kind === "contour") {
+    // the lines are made in the browser from the elevation tiles, at the layer's intervals by zoom
+    loadContour().then(mlcontour => {
+      // in a bundle on the page's own thread, its tiles read from the bundle where it would fetch them
+      const dem = new mlcontour.DemSource({
+        url: layerTiles(l, l.format ?? "png", meta.layers?.[l.id]?.v ?? meta.engine),
+        encoding: l.encoding ?? "terrarium", maxzoom: l.maxzoom ?? 12, worker: !BUNDLE
+      });
+      // a tile outside the layer's bounds (maplibre-contour asks for its neighbours) is refused here, not tried as a file
+      const inBounds = url => {
+        const [z, x, y] = url.split("/").slice(-3).map(Number), n = 2 ** z, b = l.bounds;
+        const lat = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
+        return !b || (x / n * 360 - 180 < b[2] && (x + 1) / n * 360 - 180 > b[0] && lat(y + 1) < b[3] && lat(y) > b[1]);
+      };
+      if (BUNDLE) dem.manager.getTile = url => inBounds(url) ? bundleLoad(url.slice("bundle://".length))
+        .then(b => ({ data: new Blob([fromBase64(b)], { type: `image/${l.format ?? "png"}` }) })) : Promise.reject(new Error("outside the layer's bounds"));
+      dem.setupMaplibre(maplibregl);
+      contourDem[l.id] = dem;
+      map.addSource(l.id, { type: "vector", maxzoom: 15, ...(l.bounds ? { bounds: l.bounds } : {}),
+                            tiles: [dem.contourProtocolUrl({ multiplier: l.contours.multiplier ?? 1, thresholds: l.contours.thresholds,
+                                                             contourLayer: "contours", elevationKey: "ele", levelKey: "level" })] });
+      draw();
+      if (contourFollowing(l)) followContours(l);
+    }).catch(() => missing(l));
+  } else if (l.kind === "geojson") {
+    (BUNDLE ? bundleLoad(`data/${l.id}`) : fetch(`/data/${l.id}.geojson`).then(r => r.ok ? r.json() : Promise.reject(r.status))).then(data => {
+      map.addSource(l.id, { type: "geojson", data });
+      const w = l.count?.where;
+      counts[l.id] = w ? data.features.filter(f => f.properties[w[0]] === w[1]).length : data.features.length;
+      draw();
+    }).catch(() => missing(l));
+  }
+}
+function missing(l) {
+  $(l.id).disabled = true; $("lyr-" + l.id).classList.add("off");
+  counts[l.id] = -1; countText(l);
+}
+function countText(l) {
+  const n = counts[l.id];
+  if (n === undefined) return;
+  $(l.id + "info").textContent = n < 0 ? (l.missing ? tr(l.missing) : "") : l.count?.text ? tr(l.count.text, n.toLocaleString(loc())) : "";
+}
+function showLayer(l) {
+  $("lyr-" + l.id).classList.toggle("off", !$(l.id).checked);
+  for (const st of l.style) if (map.getLayer(st.id)) map.setLayoutProperty(st.id, "visibility", $(l.id).checked ? "visible" : "none");
+}
+for (const l of OTHER) $(l.id).addEventListener("change", () => { popup?.remove(); showLayer(l); });
+// A layer's chosen variant: the paint it sets on the layer's styles, and its legend; nothing is fetched again
+function applyVariant(l) {
+  if (!l.variants) return;
+  const o = l.variants.options.find(x => x.value === $(l.id + "-by").value) ?? l.variants.options[0];
+  for (const [sid, props] of Object.entries(o.paint ?? {}))
+    if (map.getLayer(sid)) for (const [k, v] of Object.entries(props)) map.setPaintProperty(sid, k, v);
+  const box = $(l.id + "-legend");
+  if (box) {
+    box.innerHTML = legendHtml(o.legend ?? l.legend ?? []);
+    for (const el of box.querySelectorAll("[data-t]")) el.textContent = tr(el.dataset.t);
+  }
+}
+for (const l of OTHER) if (l.variants) $(l.id + "-by").addEventListener("change", () => { popup?.remove(); applyVariant(l); });
+// A layer's state: each control's value in MapLibre's global state as <id>_<name>, read by the layer's styles; it is
+// the style's, so it stays through a change of base map, and nothing is fetched again
+function stateKey(l, s) { return `${l.id}_${s.id}`; }
+function stateNow(l, s) {
+  const el = $(`${l.id}-s-${s.id}`);
+  return s.options ? (s.options.find(o => String(o.value) === el.value) ?? s.options[0]).value : el.checked;
+}
+function applyState(l) { for (const s of l.state ?? []) map.setGlobalStateProperty(stateKey(l, s), stateNow(l, s)); }
+for (const l of OTHER) for (const s of l.state ?? [])
+  $(`${l.id}-s-${s.id}`).addEventListener("change", () => { popup?.remove(); applyState(l); });
+for (const l of OTHER) if (l.shade)
+  for (const x of ["method", ...Object.keys(SHADE_RANGES), "shadow", "light"]) $(l.id + "-" + x).addEventListener("input", () => applyShade(l));
+for (const l of OTHER) if (l.colour) for (const x of COLOUR_KEYS) $(`${l.id}-c${x}`).addEventListener("input", () => applyColour(l));
+for (const l of OTHER) if (l.shade?.fit) {
+  // an intensity set by hand is kept: the view is no longer followed
+  $(`${l.id}-ex`).addEventListener("input", () => { $(`${l.id}-auto`).checked = false; });
+  $(`${l.id}-auto`).addEventListener("change", () => { if (shadeFollowing(l)) followShade(l); });
+}
+for (const l of OTHER) if (l.contours?.fit)
+  $(`${l.id}-kauto`).addEventListener("change", () => { if (contourFollowing(l)) followContours(l); else setContourLevels(l); });
+for (const l of OTHER) if (l.colour?.fit) {
+  $(`${l.id}-cfit`).addEventListener("click", () => fitColour(l));
+  // a floor or cap set by hand is kept: the view is no longer followed
+  for (const x of ["lo", "hi"]) $(`${l.id}-c${x}`).addEventListener("input", () => { $(`${l.id}-cauto`).checked = false; });
+  $(`${l.id}-cauto`).addEventListener("change", () => { if (following(l)) fitColour(l, true); });
+  // equal shares need the view's quantiles: fitted now if none are at hand
+  $(`${l.id}-cscale`).addEventListener("input", () => {
+    if ($(`${l.id}-cscale`).value === "equal" && !colourQ[l.id]) fitColour(l, true, !following(l));
+  });
+}
+
+// A layer's styles filtered to the values chosen, on top of each style's own filter; a layer without the field is
+// left as it is. Nothing is fetched again: the tiles carry the fields
+function choiceFilter(l, st) {
+  const conds = CHOOSE.flatMap((f, i) => {
+    const vals = chosen(i);
+    if (vals === null || !(f.layers ?? []).includes(l.id)) return [];
+    const os = f.options.filter(o => vals.includes(o.value));
+    const cond = ["in", ["get", f.field], ["literal", os.filter(o => o.match !== null).map(o => o.match)]];
+    return [os.some(o => o.match === null) ? ["any", ["!", ["has", f.field]], cond] : cond];
+  });
+  const parts = [st.filter, ...conds, ...timeFilter(l)].filter(Boolean);
+  return parts.length === 0 ? null : parts.length === 1 ? parts[0] : ["all", ...parts];
+}
+// The time panel's vessel and span on a layer whose features carry them (rr_time()): its pings from the span's
+// first to its last, its lines that overlap the span. Set as a vessel or span is loaded, not as the window moves
+function timeFilter(l) {
+  const f = TP?.layers?.find(x => x.id === l.id);
+  if (!f || !TS?.t?.length) return [];
+  const t0 = TS.t[0], t1 = TS.t[TS.t.length - 1], c = [];
+  if (TP.by && f.by === TP.by) c.push(["==", ["to-string", ["get", f.by]], tVes().value]);
+  if (f.t) c.push([">=", ["get", f.t], t0], ["<=", ["get", f.t], t1]);
+  else c.push([">=", ["get", f.t1], t0], ["<=", ["get", f.t0], t1]);
+  return c;
+}
+function applyChoice(l) {
+  for (const st of l.style) if (map.getLayer(st.id)) map.setFilter(st.id, choiceFilter(l, st));
+}
+// the view fitted to the choice: the combination's extent where every field has one value chosen, else the extent of
+// the values chosen of the field just changed
+function zoomToChoice(i) {
+  const sets = CHOOSE.map((f, j) => chosen(j));
+  if (sets.every(v => v === null)) return;
+  let box = CHOOSE.length > 1 && sets.every(v => v !== null && v.length === 1)
+    ? CONFIG.choose.extents?.find(e => e.key === sets.map(v => v[0]).join("\u001f"))?.bbox : null;
+  if (!box) {
+    const j = sets[i] !== null ? i : sets.findIndex(v => v !== null);
+    const bs = CHOOSE[j].options.filter(o => sets[j].includes(o.value) && o.bbox).map(o => o.bbox);
+    if (bs.length) box = [Math.min(...bs.map(b => b[0])), Math.min(...bs.map(b => b[1])),
+                          Math.max(...bs.map(b => b[2])), Math.max(...bs.map(b => b[3]))];
+  }
+  if (box) map.fitBounds([[box[0], box[1]], [box[2], box[3]]], { padding: 40, maxZoom: 14 });
+}
+function onChoice(i) {
+  popup?.remove();
+  for (const l of OTHER) applyChoice(l);
+  zoomToChoice(i);
+}
+CHOOSE.forEach((f, i) => $("ch-" + i).addEventListener("change", () => onChoice(i)));
+// ‹ and › show one value: the next or previous of the one shown, else the first or the last; all shows every value
+for (const b of document.querySelectorAll("[data-step]")) b.addEventListener("click", () => {
+  const i = +b.dataset.ch, f = CHOOSE[i], n = f.options.length, cur = chosen(i);
+  if (n < 1) return;
+  const at = cur !== null && cur.length === 1 ? f.options.findIndex(o => o.value === cur[0]) : -1;
+  setChosen(i, [f.options[at < 0 ? (+b.dataset.step > 0 ? 0 : n - 1) : (at + +b.dataset.step + n) % n].value]);
+  onChoice(i);
+  writeAddress();
+});
+for (const b of document.querySelectorAll("[data-all]")) b.addEventListener("click", () => {
+  setChosen(+b.dataset.all, null);
+  onChoice(+b.dataset.all);
+  writeAddress();
+});
+
+// A feature's title and fields; a field's value goes through `values` into a text, or into its `template`, and a
+// text's {name} is filled from the feature
+function featureHtml(l, p, fields = true) {
+  const fill = t => t.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (m, k) => esc(p[k] ?? ""));
+  const line = (k, v) => v === undefined || v === null || v === "" || v === "null" ? "" : `<br>${k}: ${v}`;
+  const val = f => {
+    const v = p[f.field];
+    if (f.values?.[v]) return fill(tr(f.values[v]));
+    if (f.template && v !== undefined && v !== null && v !== "" && v !== "null") return fill(tr(f.template));
+    if (f.format === "count" && v !== undefined && v !== null && v !== "") return (+v).toLocaleString(loc());
+    if (f.format === "value" && v !== undefined && v !== null && v !== "") return fmt(+v);
+    return v === undefined || v === null ? v : esc(v);
+  };
+  return `<b>${esc(p[l.popup.title])}</b>${(fields ? l.popup.fields ?? [] : []).map(f => line(tr(f.label), val(f))).join("")}`;
+}
+// A click on a feature: its title and fields. Registered top layer first, so the topmost feature under the click speaks
+function featurePopup(l, e) {
+  popup?.remove();
+  const box = document.createElement("div"), p = e.features[0].properties;
+  if (VERDICTS && l.popup.verdict) {                                 // the questions under the title, the fields after
+    const title = featureHtml(l, p, false), rest = document.createElement("div");
+    box.className = "rb-verdict-popup";
+    box.innerHTML = title;
+    rest.innerHTML = featureHtml(l, p).slice(title.length).replace(/^<br>/, "");
+    box.append(verdictBlock(l, e.features[0], e.lngLat), rest);
+  } else box.innerHTML = featureHtml(l, p);
+  popup = new maplibregl.Popup({ closeButton: false, maxWidth: l.popup.maxWidth ?? "300px" }).setLngLat(e.lngLat)
+    .setDOMContent(box)
+    .addTo(map);
+}
+
+// The verdicts (rr_serve(verdicts = )): in a feature's popup its layer's questions, a button for each answer, the
+// answer given filled in its colour; an answer that names another feature (`other`) opens a box for the name, the
+// names in view offered, sent with Enter or ✓; a question an earlier answer skips is left out; the note last, sent
+// with Enter or ✓. Each is sent with the feature's title and place (its own for a point, else where it was clicked). A
+// mark on each feature judged: the first question's answer its fill, the second's its ring. Asked for again when the
+// page regains the focus, so an answer from another page shows
+let verdicts = new Map();
+const V_COLOURS = ["#1a9850", "#d73027"];
+function verdictKey(layer, id, q) { return `${layer}\r${id}\r${q}`; }
+// the id a layer's answers are kept under: another layer's (`store`), shared, else its own
+function verdictStore(l) { return l.popup.verdict.store ?? l.id; }
+function verdictColour(question, value) {
+  const o = question.options, i = o.findIndex(x => x.value === value);
+  return i < 0 ? null : o[i].colour ?? V_COLOURS[i === 0 ? 0 : 1];
+}
+async function verdictsCall(method, body = null) {
+  const r = await fetch("/verdicts", { method, cache: "no-store", body: body ? JSON.stringify(body) : undefined,
+                                       headers: { "X-RB-Notes": "1", ...(body ? { "Content-Type": "application/json" } : {}) } });
+  const t = await r.text();
+  if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
+  return JSON.parse(t);
+}
+function verdictsFrom(r) {
+  verdicts = new Map((r.verdicts ?? []).map(v => [verdictKey(v.layer, String(v.id), v.question), v]));
+  const marks = new Map();                                           // a feature's mark: its first two questions' colours
+  for (const v of verdicts.values()) {
+    const l = OTHER.find(x => x.popup?.verdict && verdictStore(x) === v.layer), qs = l?.popup?.verdict?.questions ?? [];
+    const qi = qs.findIndex(q => q.id === v.question);
+    if (qi < 0 || qi > 1 || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) continue;
+    const k = `${v.layer}\r${v.id}`, m = marks.get(k) ?? { lon: v.lon, lat: v.lat };
+    m[qi === 0 ? "fill" : "ring"] = verdictColour(qs[qi], v.value);
+    marks.set(k, m);
+  }
+  map.getSource("rb-verdicts")?.setData({ type: "FeatureCollection", features: [...marks.values()]
+    .map(m => ({ type: "Feature", properties: { fill: m.fill ?? "#ffffff", ring: m.ring ?? "#ffffff" },
+                 geometry: { type: "Point", coordinates: [m.lon, m.lat] } })) });
+}
+function verdictsLoad() { return verdictsCall("GET").then(verdictsFrom).catch(() => {}); }
+// the names in view, offered in a box that names another feature: the titles of the features drawn now
+function namesInView() {
+  const ids = OTHER.filter(l => l.popup?.title).flatMap(l => (l.style ?? []).map(x => x.id)).filter(id => map.getLayer(id));
+  const t = new Set();
+  for (const f of map.queryRenderedFeatures({ layers: ids })) {
+    const l = OTHER.find(x => x.style?.some(y => y.id === f.layer.id)), v = f.properties[l?.popup?.title];
+    if (v !== undefined && v !== null && v !== "") t.add(String(v));
+  }
+  return [...t].sort((a, b) => a.localeCompare(b, loc())).slice(0, 500);
+}
+let vListN = 0;
+function verdictBlock(l, f, at) {
+  const v = l.popup.verdict, id = f.properties[v.field], div = document.createElement("div");
+  div.className = "verdict";
+  if (id === undefined || id === null || id === "") return div;      // a feature with no name takes no verdict
+  const pt = f.geometry?.type === "Point" ? f.geometry.coordinates : [at.lng, at.lat];
+  const now = q => verdicts.get(verdictKey(verdictStore(l), String(id), q));
+  const list = `rb-vnames-${++vListN}`;
+  let asking = null, msg = "";                                       // a question whose answer waits for a name
+  const skipped = q => Object.entries(q.skip ?? {}).some(([k, vals]) => vals.includes(now(k)?.value));
+  const draw = () => {
+    const parts = v.questions.filter(q => !skipped(q)).map(q => {
+      const cur = now(q.id), wait = asking?.q === q.id ? asking.value : null;
+      const named = cur && q.options.find(o => o.value === cur.value)?.other ? ` <em>${esc(cur.other)}</em>` : "";
+      const opts = q.options.map(o => `<button data-q="${esc(q.id)}" data-v="${esc(o.value)}" class="${(wait ?? cur?.value) === o.value ? "on" : ""}" ` +
+                                       `style="--vc:${verdictColour(q, o.value)}">${esc(tr(o.label))}</button>`).join("");
+      const clear = cur ? `<button data-q="${esc(q.id)}" data-v="" class="v-clear" title="${esc(tr("vClear"))}">×</button>` : "";
+      const box = wait ? `<div class="v-other"><input data-other="${esc(q.id)}" list="${list}" maxlength="200" ` +
+                         `placeholder="${esc(tr("vOther"))}" value="${esc(cur?.value === wait ? cur.other : "")}">` +
+                         `<button data-send="${esc(q.id)}" style="--vc:${verdictColour(q, wait)}">✓</button></div>` : "";
+      return `<div class="v-q">${q.label ? `<div class="v-ql">${esc(tr(q.label))}${named}</div>` : named ? `<div class="v-ql">${named}</div>` : ""}` +
+             `<div class="v-opts">${opts}${clear}</div>${box}</div>`;
+    }).join("");
+    const note = v.text ? `<div class="v-other"><input class="v-text" maxlength="1000" placeholder="${esc(tr("vNote"))}" ` +
+                          `value="${esc(now("note")?.text ?? "")}"><button data-note="1" style="--vc:#666">✓</button></div>` : "";
+    div.innerHTML = parts + note + `<datalist id="${list}">${namesInView().map(n => `<option value="${esc(n)}">`).join("")}</datalist>` +
+                    `<div class="v-msg">${esc(msg)}</div>`;
+    div.querySelector("input[data-other]")?.focus();
+  };
+  const send = async body => {
+    try {
+      verdictsFrom(await verdictsCall("POST", { layer: l.id, id: String(id), title: String(f.properties[l.popup.title] ?? ""),
+                                                 lon: pt[0], lat: pt[1], zoom: map.getZoom(), ...body }));
+      asking = null; msg = tr("vSaved");
+    } catch (err) { msg = tr("vFailed", err.message); }
+    draw();
+  };
+  const sendOther = q => {
+    const name = div.querySelector(`input[data-other="${q}"]`)?.value.trim() ?? "";
+    if (!name) { msg = tr("vOtherNeeded"); draw(); return; }
+    send({ question: q, value: asking.value, other: name });
+  };
+  draw();
+  div.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.note) return send({ question: "note", value: "", text: div.querySelector(".v-text")?.value ?? "" });
+    if (b.dataset.send) return sendOther(b.dataset.send);
+    const q = v.questions.find(x => x.id === b.dataset.q); if (!q) return;
+    if (b.dataset.v && q.options.find(o => o.value === b.dataset.v)?.other) { asking = { q: q.id, value: b.dataset.v }; msg = ""; draw(); return; }
+    send({ question: q.id, value: b.dataset.v });
+  });
+  div.addEventListener("keydown", e => {
+    if (e.key !== "Enter") return;
+    if (e.target.dataset.other) { e.preventDefault(); sendOther(e.target.dataset.other); }
+    else if (e.target.classList.contains("v-text")) { e.preventDefault(); send({ question: "note", value: "", text: e.target.value }); }
+  });
+  return div;
+}
+function verdictsSetup() {
+  map.addSource("rb-verdicts", { type: "geojson", data: EMPTY });
+  map.addLayer({ id: "rb-verdict-mark", type: "circle", source: "rb-verdicts",
+                 paint: { "circle-radius": 5, "circle-color": ["get", "fill"], "circle-stroke-color": ["get", "ring"],
+                          "circle-stroke-width": 2.2 } },
+               map.getLayer("rb-notes-dot") ? "rb-notes-dot" : undefined);
+  verdictsLoad();
+  window.addEventListener("focus", verdictsLoad);
+}
+// The notes' clicks first (rr_serve(notes = )): a click that places a note, or on a note's pin, opens no feature
+if (NOTES) map.on("click", noteClick);
+for (const l of [...OTHER].reverse()) for (const id of l.popup?.click ?? []) {
+  map.on("click", id, e => { if (e.originalEvent.featureShown) return; e.originalEvent.featureShown = true; featurePopup(l, e); });
+  map.on("mouseenter", id, () => { if (!noting) map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", id, () => { if (!noting) map.getCanvas().style.cursor = ""; });
+}
+// A hover over a feature (popup `hover`): its title, and its fields with `hover_fields`, in a light label beside the
+// pointer, gone when it leaves. One query for every hover style, whose first feature is the topmost, as a click's. A
+// click hides it until the pointer is over another feature, so it does not sit over the click's popup; a drag hides it
+const HOVER = new Map(OTHER.flatMap(l => (l.popup?.hover ?? []).map(id => [id, l])));
+let hoverTip = null, hoverKey = null, hoverClicked = null, hoverFrame = 0, hoverEvent = null;
+function hideHover() { hoverTip?.remove(); hoverKey = null; }
+// the topmost feature of the hover styles at a point, and a key that tells it from another
+function hoverFeature(point) {
+  const ids = [...HOVER.keys()].filter(id => map.getLayer(id));
+  const f = ids.length ? map.queryRenderedFeatures(point, { layers: ids })[0] : null;
+  return f ? { f, key: `${f.layer.id}\u001f${f.id ?? JSON.stringify(f.properties)}` } : null;
+}
+function hoverAt(e) {
+  const h = e.originalEvent.buttons ? null : hoverFeature(e.point);
+  if (!h) { hoverClicked = null; return hideHover(); }
+  const { f, key } = h, l = HOVER.get(f.layer.id);
+  if (key === hoverClicked) return hideHover();
+  hoverClicked = null;
+  hoverTip ??= new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: "rb-hover", offset: 14,
+                                      maxWidth: l.popup.maxWidth ?? "300px" });
+  if (key !== hoverKey) hoverTip.setHTML(featureHtml(l, f.properties, !!l.popup.hover_fields));
+  hoverKey = key;
+  hoverTip.setLngLat(e.lngLat);
+  if (!hoverTip.isOpen()) hoverTip.addTo(map);
+}
+if (HOVER.size) {
+  map.on("mousemove", e => {
+    hoverEvent = e;
+    hoverFrame ||= requestAnimationFrame(() => { hoverFrame = 0; hoverAt(hoverEvent); });
+  });
+  map.on("mouseout", hideHover);
+  map.on("dragstart", hideHover);
+  map.on("click", e => { hoverClicked = hoverFeature(e.point)?.key ?? null; hideHover(); });
+}
+
+// The notes (rr_serve(notes = )) -----------------------------------------------------------------------------------
+// "Add a note", then a click on the map: a note pinned there, with the features under it and the page's address,
+// written by the server to its file. A reply, from the page or from R (rr_notes_add()), joins the note's thread at
+// its place. The notes are asked for again when the page regains the focus and every 30 s, so a reply written in R
+// shows without a reload; a thread shown is drawn again when it has grown, unless a reply is being written in it
+// (functions, not constants: the page's language lists the notes before this part of the page has run)
+function noteRoots() { return notes.filter(n => n.reply_to == null); }
+function noteThread(id) { return notes.filter(n => n.id === id || n.reply_to === id); }
+function noteWaiting(id) { return noteThread(id).at(-1)?.author === "reader"; }
+function noteWho(a) { return a === "reader" ? tr("nReader") : a ?? ""; }
+function noteTime(t) { return String(t ?? "").replace("T", " ").slice(0, 16); }
+async function notesCall(method, path = "/notes", body = null) {
+  const r = await fetch(path, { method, cache: "no-store", body: body ? JSON.stringify(body) : undefined,
+                                headers: { "X-RB-Notes": "1", ...(body ? { "Content-Type": "application/json" } : {}) } });
+  const t = await r.text();
+  if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
+  return JSON.parse(t);
+}
+function notesFrom(fc) {
+  const before = noteShown == null ? 0 : noteThread(noteShown).length;
+  notes = (fc.features ?? []).map(f => ({ ...f.properties, lon: f.geometry?.coordinates?.[0], lat: f.geometry?.coordinates?.[1] }))
+                             .filter(n => Number.isFinite(n.id));
+  map.getSource("rb-notes")?.setData({ type: "FeatureCollection", features: noteRoots()
+    .filter(n => Number.isFinite(n.lon) && Number.isFinite(n.lat))
+    .map(n => ({ type: "Feature", properties: { id: n.id, waiting: noteWaiting(n.id) },
+                 geometry: { type: "Point", coordinates: [n.lon, n.lat] } })) });
+  noteList();
+  if (noteShown != null && notePopup?.isOpen()) {
+    const ta = notePopup.getElement().querySelector("textarea");
+    if (!noteThread(noteShown).length) notePopup.remove();
+    else if (noteThread(noteShown).length !== before && !ta?.value) noteOpen(noteShown, false);
+  }
+}
+function notesLoad() { return notesCall("GET").then(notesFrom).catch(err => { $("n-file").textContent = tr("nFailed", err.message); }); }
+function noteList() {
+  const roots = noteRoots();
+  $("n-list").replaceChildren(...roots.map(n => {
+    const li = document.createElement("li"), k = noteThread(n.id).length - 1;
+    li.dataset.id = n.id;
+    li.innerHTML = `<i style="background:${noteWaiting(n.id) ? N_WAIT : N_DONE}"></i><span><b>${n.id}</b> ${esc(n.text)}` +
+                   `${k ? ` <em>(${k === 1 ? tr("nReply1") : tr("nReplies", k)})</em>` : ""}</span>`;
+    return li;
+  }));
+  $("n-file").textContent = `${roots.length ? "" : tr("nNone") + " "}${tr("nFile", NOTES.file)}`;
+}
+// placing a note: the next click on the map; Esc or the button again stops it
+function notePlacing(on) {
+  noting = on;
+  $("n-add").classList.toggle("on", on);
+  $("n-add").dataset.t = on ? "nPlace" : "nAdd";
+  $("n-add").textContent = tr($("n-add").dataset.t);
+  map.getCanvas().style.cursor = on ? "crosshair" : "";
+  if (on) { popup?.remove(); hideHover(); document.body.classList.remove("side-open"); }
+}
+// the features under a point, each "layer: title", from the layers whose features have a title
+function notesUnder(point) {
+  const ids = [...new Set(OTHER.flatMap(l => l.popup?.title ? [...(l.popup.click ?? []), ...(l.popup.hover ?? [])] : []))]
+    .filter(id => map.getLayer(id));
+  const out = [];
+  for (const f of ids.length ? map.queryRenderedFeatures(point, { layers: ids }) : []) {
+    const l = OTHER.find(x => x.style.some(s => s.id === f.layer.id)), t = f.properties[l.popup.title];
+    const s = `${tr(l.label)}: ${t}`;
+    if (t != null && t !== "" && !out.includes(s)) out.push(s);
+  }
+  return out.slice(0, 20);
+}
+function noteClick(e) {
+  if (noting) {
+    e.originalEvent.featureShown = true;
+    notePlacing(false);
+    return noteForm(e);
+  }
+  const f = map.getLayer("rb-notes-dot") ? map.queryRenderedFeatures(e.point, { layers: ["rb-notes-dot"] })[0] : null;
+  if (!f) return;
+  e.originalEvent.featureShown = true;
+  noteOpen(f.properties.id);
+}
+// a box of buttons and a text: Save (or Ctrl/⌘ + Enter) sends it, an error is shown in it and the text kept
+function noteBox(html, send) {
+  const box = document.createElement("div");
+  box.className = "note";
+  box.innerHTML = html + `<div class="err" hidden></div>`;
+  const ta = box.querySelector("textarea"), err = box.querySelector(".err");
+  const go = async () => {
+    if (!ta.value.trim()) return ta.focus();
+    const bs = box.querySelectorAll("button");
+    bs.forEach(b => { b.disabled = true; });
+    try { await send(ta.value); }
+    catch (x) { err.hidden = false; err.textContent = tr("nFailed", x.message); bs.forEach(b => { b.disabled = false; }); }
+  };
+  box.querySelector('[data-act="send"]').addEventListener("click", go);
+  box.querySelector('[data-act="cancel"]')?.addEventListener("click", () => notePopup?.remove());
+  ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) go(); });
+  return box;
+}
+function noteShow(lnglat, box) {
+  popup?.remove(); notePopup?.remove();
+  // no focus on the popup's first button (a note's "delete"): the text box takes it
+  notePopup = new maplibregl.Popup({ closeOnClick: false, focusAfterOpen: false, maxWidth: "360px" })
+    .setLngLat(lnglat).setDOMContent(box).addTo(map);
+  notePopup.on("close", () => { noteShown = null; });
+}
+// a new note's form where the map was clicked
+function noteForm(e) {
+  const under = notesUnder(e.point), at = e.lngLat.wrap();
+  const box = noteBox(`<textarea rows="4" placeholder="${esc(tr("nPlaceholder"))}"></textarea>` +
+    (under.length ? `<div class="under">${esc(tr("nOn", under.join("; ")))}</div>` : "") +
+    `<div class="acts"><button data-act="cancel">${esc(tr("nCancel"))}</button><button data-act="send">${esc(tr("nSave"))}</button></div>`,
+    async text => {
+      addressNow();
+      const fc = await notesCall("POST", "/notes", { text, lon: at.lng, lat: at.lat, zoom: map.getZoom(), under,
+                                                     address: location.search + location.hash });
+      notesFrom(fc);
+      noteOpen(fc.added);
+    });
+  noteShow(at, box);
+  noteShown = null;
+  box.querySelector("textarea").focus();
+}
+// a thread: each note with its author and time, the reply box under them (focused, unless drawn again on its own)
+function noteOpen(id, focus = true) {
+  const th = noteThread(id), root = th[0];
+  if (!root || root.id !== id) return;
+  const box = noteBox(th.map(n => `<div class="entry"><div class="who"><b>${n.id === id ? "#" + id : "↳"}</b>` +
+      `<span>${esc(noteWho(n.author))}</span><span>${esc(noteTime(n.time))}</span>` +
+      `<button class="del" data-del="${n.id}">${esc(tr("nDelete"))}</button></div>` +
+      `<div class="text">${esc(n.text)}</div>` +
+      (Array.isArray(n.under) && n.under.length ? `<div class="under">${esc(tr("nOn", n.under.join("; ")))}</div>` : "") +
+      "</div>").join("") +
+    `<textarea rows="2" placeholder="${esc(tr("nReplyPlaceholder"))}"></textarea>` +
+    `<div class="acts"><button data-act="send">${esc(tr("nReply"))}</button></div>`,
+    async text => { notesFrom(await notesCall("POST", "/notes", { text, reply_to: id })); noteOpen(id); });
+  for (const b of box.querySelectorAll("[data-del]")) b.addEventListener("click", async () => {
+    const d = +b.dataset.del;
+    if (!confirm(d === id ? tr("nDeleteThread", id) : tr("nDeleteOne"))) return;
+    try { notesFrom(await notesCall("DELETE", `/notes/${d}`)); if (d !== id) noteOpen(id); }
+    catch (x) { const err = box.querySelector(".err"); err.hidden = false; err.textContent = tr("nFailed", x.message); }
+  });
+  noteShow([root.lon, root.lat], box);
+  noteShown = id;
+  if (focus) box.querySelector("textarea").focus({ preventScroll: true });
+}
+function notesSetup() {
+  map.addSource("rb-notes", { type: "geojson", data: EMPTY });
+  map.addLayer({ id: "rb-notes-dot", type: "circle", source: "rb-notes",
+                 paint: { "circle-radius": 9, "circle-color": ["case", ["get", "waiting"], N_WAIT, N_DONE],
+                          "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+  map.addLayer({ id: "rb-notes-id", type: "symbol", source: "rb-notes",
+                 layout: { "text-field": ["to-string", ["get", "id"]], "text-font": FONT, "text-size": 11,
+                           "text-allow-overlap": true, "text-ignore-placement": true },
+                 paint: { "text-color": "#fff" } });
+  map.on("mouseenter", "rb-notes-dot", () => { if (!noting) map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "rb-notes-dot", () => { if (!noting) map.getCanvas().style.cursor = ""; });
+  $("n-add").addEventListener("click", () => notePlacing(!noting));
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && noting) notePlacing(false); });
+  $("n-show").addEventListener("change", () => {
+    for (const id of ["rb-notes-dot", "rb-notes-id"]) map.setLayoutProperty(id, "visibility", $("n-show").checked ? "visible" : "none");
+  });
+  $("n-list").addEventListener("click", e => {
+    const n = notes.find(x => x.id === +e.target.closest("li")?.dataset.id);
+    if (!n) return;
+    map.easeTo({ center: [n.lon, n.lat], zoom: Math.max(map.getZoom(), n.zoom ?? 0) });
+    document.body.classList.remove("side-open");
+    noteOpen(n.id);
+  });
+  notesLoad();
+  window.addEventListener("focus", notesLoad);
+  setInterval(() => { if (!document.hidden) notesLoad(); }, 30000);
+}
+
+// The grid's controls --------------------------------------------------------------------------------------------------
+if (G) {
+  for (const f of G.filters ?? []) {
+    if (f.type === "metric") continue;
+    for (const p of f.type === "range" ? f.params : [f.id])
+      $(p).addEventListener("change", () => {
+        if (f.type === "range" && +$(f.params[0]).value > +$(f.params[1]).value)
+          [$(f.params[0]).value, $(f.params[1]).value] = [$(f.params[1]).value, $(f.params[0]).value];
+        popup?.remove();
+        tileError = "";
+        map.getSource(G.id)?.setTiles([tileUrl()]);   // before the first load, the start reads the filters itself
+      });
+  }
+  $("metric")?.addEventListener("change", () => { userColour = false; sampleView(); paint(); fitToView(); });
+  $("lo").addEventListener("input", () => { userColour = true; paint(); });
+  $("hi").addEventListener("input", () => { userColour = true; paint(); });
+  $("palette").addEventListener("change", paint);
+  $("stretch").addEventListener("change", () => { viewVals.length ? paint() : fitToView(); });
+  $("fit").addEventListener("click", () => { userColour = true; fitToView(); writeAddress(); });
+  // the grid on or off (its controls and legend shown only when on), and its opacity
+  $(G.id).addEventListener("change", () => {
+    const on = $(G.id).checked;
+    $("lyr-" + G.id).classList.toggle("off", !on);
+    popup?.remove();
+    if (map.getLayer(G.id)) map.setLayoutProperty(G.id, "visibility", on ? "visible" : "none");
+    if (on) paint();   // the histogram's canvas had no width while hidden
+  });
+  $("opacity").addEventListener("input", () => {
+    $("opval").textContent = `${$("opacity").value} %`;
+    if (map.getLayer(G.id)) map.setPaintProperty(G.id, "fill-opacity", +$("opacity").value / 100);
+  });
+}
+for (const b of document.querySelectorAll(".info-btn"))
+  b.addEventListener("click", () => { const el = $(b.dataset.info); if (el) el.hidden = !el.hidden; });
+// on a phone the sidebar is a drawer over the map
+$("menu").addEventListener("click", () => document.body.classList.add("side-open"));
+$("close").addEventListener("click", () => document.body.classList.remove("side-open"));
+
+map.on("dataloading", () => { $("status").textContent = tr("loading"); });
+// a dem layer's colours, and a contour layer's levels, following the view are fitted again each time the map settles
+map.on("moveend", () => {
+  for (const l of OTHER) if (following(l) && map.getLayer(l.style[0].id)) {
+    clearTimeout(fitTimers[l.id]); fitTimers[l.id] = setTimeout(() => fitColour(l, true), 300);
+  }
+  for (const l of OTHER) if (contourFollowing(l) && map.getSource(l.id)) {
+    clearTimeout(contourTimers[l.id]); contourTimers[l.id] = setTimeout(() => followContours(l), 300);
+  }
+  for (const l of OTHER) if (shadeFollowing(l) && map.getLayer(l.style[0].id)) {
+    clearTimeout(shadeTimers[l.id]); shadeTimers[l.id] = setTimeout(() => followShade(l), 300);
+  }
+});
+// a refused tile would otherwise leave the map blank without a word
+map.on("error", async e => {
+  const s = e.error?.status;
+  if (!s || tileError) return;
+  tileError = tr("refused", s);
+  const why = await e.error.body?.text?.().catch(() => "") ?? "";
+  const engine = BUNDLE ? BUNDLE.meta.engine : await fetch("/meta").then(r => r.json()).then(m => m.engine).catch(() => null);
+  tileError = engine !== ENGINE ? tr("older", engine ?? "?", ENGINE) : `${tr("refused", s)}${why ? ": " + why : ""}`;
+  $("status").textContent = tileError;
+});
+function sampleView() {
+  if (!G || !map.getLayer(G.id)) return;
+  histVals = map.queryRenderedFeatures({ layers: [G.id] }).map(f => +f.properties[metric()]).filter(x => x > 0).map(Math.log10);
+  // an equal stretch with a floor and cap from the address has no fit to take its shares from: the first view gives them
+  if (!viewVals.length && histVals.length >= 10) { viewVals = [...histVals].sort((a, b) => a - b); paint(); }
+  drawHist();
+}
+
+map.on("idle", () => {
+  sampleView();
+  $("status").textContent = tileError || zoomText();
+  // the first fit waits for cells to fit to: a page opened with the grid off fits when it is turned on
+  if (G && !fitted && map.getLayer(G.id) && $(G.id).checked) fitted = fitToView();
+});
+
+if (G) {
+  // the grid's popup, registered after the other layers': a feature over the cell has spoken
+  map.on("click", G.id, e => {
+    if (e.originalEvent.featureShown) return;
+    const p = e.features[0].properties, fs = G.popup?.fields ?? [];
+    const v = f => f.format === "count" ? (+p[f.field]).toLocaleString(loc()) : fmt(+p[f.field]);
+    popup?.remove();
+    popup = new maplibregl.Popup({ closeButton: false }).setLngLat(e.lngLat)
+      .setHTML(fs.map((f, i) => i === 0 ? `<b>${v(f)}</b> ${tr(f.label)}` : `${v(f)} ${tr(f.label)}`).join("<br>"))
+      .addTo(map);
+  });
+  map.on("mouseenter", G.id, () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", G.id, () => { map.getCanvas().style.cursor = ""; });
+}
+
+// The time panel (rr_time()) ---------------------------------------------------------------------------------------
+// One vessel's span held whole in the page: its columns over time in a chart (uPlot), its marks and lanes, and on the
+// map the window's track and pings. A drag across the chart sets the window, a double click shows the whole span; a
+// hover marks the ping on the map, a click on a ping of the window marks its time on the chart. The map's window is
+// drawn as new data each time: a filter on a big source re-tiles it (0.3 s on 150,000 points, as measured)
+// where new data of a day take 17 ms, so the window's pings are thinned to T_MAX, a marked one always kept.
+// pings drawn at most; a silence that breaks the line (s; rr_time(max_gap_s = ), none by default); a lane's height
+const T_MAX = 5000, T_GAP = TP?.max_gap_s ?? Infinity, LANE_H = 20;
+const T_COLS = ["#2c5d87", "#d95f02", "#1b9e77", "#7570b3", "#e7298a", "#66a61e"];   // the page's blue, then Dark2
+// a mark column's colour, the first red as before; then colours apart from the lines' and from each other on the dark
+// base map and the white chart
+const T_MARKS = ["#e31a1c", "#ff7f00", "#c51b8a", "#33a02c", "#1f78b4", "#a6761d"];
+const T_MARK_ROW = 8, LANE_FILL = ["#d9dde1", "#c4c9ce"];   // a mark row's height (px)
+const markColour = c => T_MARKS[c % T_MARKS.length];
+const LANE_PAL = ["#b3cde3", "#ccebc5", "#fed9a6", "#decbe4", "#fbb4ae", "#ffffcc", "#e5d8bd", "#fddaec"];   // Pastel1
+const INFERNO9 = ["#040404", "#2D1243", "#611163", "#961474", "#C53270", "#EB5C4C", "#F69422", "#F8C952", "#FFFE9E"];
+const EMPTY = { type: "FeatureCollection", features: [] };
+let uplotLib = null, tSeq = 0, tFrame = 0, tPinned = null;   // tPinned: a ping clicked on the map, until the pointer moves
+// uPlot, pinned as MapLibre is, loaded only for a map with a time panel
+const loadUplot = () => uplotLib ??= new Promise((resolve, reject) => {
+  const c = document.createElement("link");
+  c.rel = "stylesheet"; c.href = "vendor/uPlot.min.css";
+  document.head.append(c);
+  const s = document.createElement("script");
+  s.src = "vendor/uPlot.iife.min.js";
+  s.onload = () => window.uPlot ? resolve(window.uPlot) : reject(new Error("uPlot"));
+  s.onerror = reject;
+  document.head.append(s);
+});
+// a time in seconds as the data hold it, in no zone
+const tTime = (s, sec = false) => Number.isFinite(s) ? new Date(s * 1000).toISOString().slice(0, sec ? 19 : 16).replace("T", " ") : "";
+const tNum = v => v == null ? "–" : (+(+v).toPrecision(4)).toLocaleString(loc());
+const tVes = () => TP.vessels.find(v => v.value === $("t-vessel").value) ?? TP.vessels[0];
+// the first index at or after a (after = true: the first after a) in the span's times, which are sorted
+function tFind(a, after = false) {
+  const t = TS.t;
+  let lo = 0, hi = t.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (after ? t[m] <= a : t[m] < a) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+function timeSetup(q) {
+  document.body.classList.add("has-time");
+  $("timep").hidden = false;
+  tLayers();
+  tVessels();
+  const v0 = TP.vessels.find(v => v.value === q.get("tv")) ?? TP.vessels[0];
+  $("t-vessel").value = v0.value;
+  tSpans(v0, q.get("tspan"));
+  if (TP.cols.length > 1) {
+    $("t-cols-row").hidden = false;
+    TP.cols.forEach((c, i) => $("t-cols").insertAdjacentHTML("beforeend",
+      `<label><input type="checkbox" data-col="${i}" aria-label="${esc(tr(c.label))}"${i ? "" : " checked"}><span style="color:${T_COLS[i % T_COLS.length]}">${esc(tr(c.label))}</span></label>`));
+  }
+  // each mark column's colour, as its ticks and rings are drawn
+  if (TP.marks.length) {
+    $("t-marks-row").hidden = false;
+    TP.marks.forEach((m, c) => $("t-marks").insertAdjacentHTML("beforeend",
+      `<span class="t-mark"><i style="background:${markColour(c)}"></i>${esc(tr(m.label))}</span>`));
+  }
+  $("t-vessel").addEventListener("change", () => { tSpans(tVes(), null, true); tLoad(); });
+  $("t-span").addEventListener("change", () => { tSpanSteps(); tLoad(); });
+  // ‹ › step through the spans, a fault or a trip at a time
+  for (const [id, by] of [["t-span-prev", -1], ["t-span-next", 1]]) $(id).addEventListener("click", () => {
+    const s = $("t-span"), k = s.selectedIndex + by;
+    if (k < 0 || k >= s.options.length) return;
+    s.selectedIndex = k;
+    s.dispatchEvent(new Event("change"));
+  });
+  $("t-whole").addEventListener("click", () => tSetWindow(null));
+  $("t-cols").addEventListener("change", e => TU?.setSeries(+e.target.dataset.col + 1, { show: e.target.checked }));
+  $("t-lanes").style.height = `${TP.lanes.length * LANE_H}px`;
+  $("t-lanes").addEventListener("click", e => { const h = tLaneAt(e); if (h) tSetWindow(h.pad); });
+  $("t-lanes").addEventListener("mousemove", e => {
+    const h = tLaneAt(e);
+    $("t-lanes").title = h ? `${tr(h.lane.label)}: ${h.label ?? ""} ${tTime(h.t0)} to ${tTime(h.t1)}` : "";
+  });
+  new ResizeObserver(() => TU?.setSize({ width: $("t-chart").clientWidth, height: $("t-chart").clientHeight })).observe($("t-chart"));
+  // a click near a ping of the window (within 8 px: a ping is a small target) marks its time on the chart
+  map.on("click", e => {
+    if (!TU || !map.getLayer("rb-time-dot")) return;
+    const { x, y } = e.point, fs = map.queryRenderedFeatures([[x - 8, y - 8], [x + 8, y + 8]], { layers: ["rb-time-dot"] });
+    let i = null, best = Infinity;
+    for (const f of fs) {
+      const p = map.project(f.geometry.coordinates), d = (p.x - x) ** 2 + (p.y - y) ** 2;
+      if (d < best) { best = d; i = f.properties.i; }
+    }
+    if (i == null) return;
+    e.originalEvent.featureShown = true;
+    // the cursor on that very ping: at a coarse window several pings share a pixel, which the chart would snap among
+    const yv = TS.y[TP.cols[0].field][i];
+    tPinned = i;
+    TU.setCursor({ left: TU.valToPos(TS.t[i], "x"), top: yv == null ? 0 : TU.valToPos(yv, "y0") });
+  });
+  map.on("mouseenter", "rb-time-dot", () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", "rb-time-dot", () => { map.getCanvas().style.cursor = ""; });
+  const w = (q.get("tw") ?? "").split(",").map(Number);
+  tLoad(w.length === 2 && w.every(Number.isFinite) && w[0] < w[1] ? w : null);
+}
+// the vessels and spans to choose from, their counts in the page's language
+function tVessels() {
+  const v = $("t-vessel").value;
+  $("t-vessel").replaceChildren(...TP.vessels.map(x => new Option(`${x.value} (${x.n.toLocaleString(loc())})`, x.value)));
+  if (v) $("t-vessel").value = v;
+}
+// the span chosen is kept: from the address (want), else the one shown; for another vessel, only the whole series or a
+// month, which mean the same for every vessel (a vessel's own spans, s1, s2, ..., are its own)
+function tSpans(v, want = null, otherVessel = false) {
+  let s = want ?? $("t-span").value;
+  if (want == null && otherVessel && /^s\d+$/.test(s)) s = null;
+  $("t-span").replaceChildren(...v.spans.map(x => new Option(
+    x.value === "all" ? tr("tWhole", x.n.toLocaleString(loc())) : `${x.name ?? x.value} (${x.n.toLocaleString(loc())})`, x.value)));
+  $("t-span").value = v.spans.some(x => x.value === s) ? s : v.span;
+  tSpanSteps();
+}
+// the step buttons, off at either end of the list
+function tSpanSteps() {
+  const s = $("t-span");
+  $("t-span-prev").disabled = s.selectedIndex <= 0;
+  $("t-span-next").disabled = s.selectedIndex >= s.options.length - 1;
+}
+function timeLang() { tVessels(); tSpans(tVes()); tInfo(); TU?.redraw(false, false); }
+
+// the window's track, its pings (coloured by the first column, a mark ringed) and the ping under the cursor, over every
+// other layer; the line drawn twice, dark under light, so it shows on any base map
+function tLayers() {
+  map.addSource("rb-time-line", { type: "geojson", data: EMPTY });
+  map.addSource("rb-time-pts", { type: "geojson", data: EMPTY });
+  map.addSource("rb-time-hover", { type: "geojson", data: EMPTY });
+  map.addLayer({ id: "rb-time-case", type: "line", source: "rb-time-line",
+                 paint: { "line-color": "#000", "line-width": 3.5, "line-opacity": 0.45 } });
+  map.addLayer({ id: "rb-time-line", type: "line", source: "rb-time-line",
+                 paint: { "line-color": "#fff", "line-width": 1.5, "line-opacity": 0.9 } });
+  map.addLayer({ id: "rb-time-dot", type: "circle", source: "rb-time-pts",
+                 paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 1.5, 12, 3.5],
+                          "circle-color": "#808080", "circle-stroke-color": "#fff",
+                          "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 9, 0, 11, 0.6] } });
+  // a marked ping's ring, in the colour of the first mark column that holds it
+  map.addLayer({ id: "rb-time-mark", type: "circle", source: "rb-time-pts", filter: ["has", "mk"],
+                 paint: { "circle-radius": 7, "circle-opacity": 0, "circle-stroke-width": 2,
+                          "circle-stroke-color": ["match", ["get", "mkc"], ...T_MARKS.flatMap((col, c) => [c, col]), T_MARKS[0]] } });
+  map.addLayer({ id: "rb-time-hover", type: "circle", source: "rb-time-hover",
+                 paint: { "circle-radius": 9, "circle-opacity": 0, "circle-stroke-color": "#000", "circle-stroke-width": 5 } });
+  map.addLayer({ id: "rb-time-hover-in", type: "circle", source: "rb-time-hover",
+                 paint: { "circle-radius": 9, "circle-opacity": 0, "circle-stroke-color": "#fff", "circle-stroke-width": 2.5 } });
+}
+
+// One vessel's span from the server, or from the bundle's file for it; a later choice wins over an earlier one
+async function tLoad(win = null) {
+  const v = tVes(), span = $("t-span").value, seq = ++tSeq;
+  $("t-info").textContent = tr("tLoading");
+  let d;
+  try {
+    d = BUNDLE ? await bundleLoad(`time/${TP.vessels.indexOf(v)}_${span}`)
+               : await fetch(`/time?v=${encodeURIComponent(v.value)}&span=${encodeURIComponent(span)}`)
+                   .then(async r => r.ok ? r.json() : Promise.reject(new Error(await r.text())));
+  } catch (err) {
+    if (seq === tSeq) $("t-info").textContent = tr("tFailed", err?.message ?? err);
+    return;
+  }
+  if (seq !== tSeq) return;
+  TS = d;
+  // each ping's marks: the text of every mark column that holds it (a logical column's by its label alone), and the
+  // first such column, whose colour rings it on the map; each column's pings, for its row of ticks
+  TS.mk = new Array(d.t.length).fill(null);
+  TS.mkc = new Array(d.t.length).fill(null);
+  TS.mkRows = TP.marks.map(() => []);
+  TP.marks.forEach((m, c) => {
+    const k = d.marks?.[m.field];
+    if (!k) return;
+    TS.mkRows[c] = k.i;
+    k.i.forEach((i, j) => {
+      const txt = k.v[j] === m.field ? tr(m.label) : `${tr(m.label)}: ${k.v[j]}`;
+      TS.mk[i] = TS.mk[i] ? `${TS.mk[i]} · ${txt}` : txt;
+      TS.mkc[i] ??= c;
+    });
+  });
+  // the first column's colours, over its 1st to 99th percentile in the span
+  const y0 = d.y[TP.cols[0].field].filter(Number.isFinite).sort((a, b) => a - b);
+  TS.lo = y0[Math.floor(0.01 * (y0.length - 1))] ?? 0;
+  TS.hi = y0[Math.floor(0.99 * (y0.length - 1))] ?? 1;
+  if (!(TS.hi > TS.lo)) TS.hi = TS.lo + 1;
+  map.setPaintProperty("rb-time-dot", "circle-color", ["case", ["has", "v"],
+    ["interpolate", ["linear"], ["get", "v"], ...INFERNO9.flatMap((c, j) => [TS.lo + (TS.hi - TS.lo) * j / 8, c])], "#808080"]);
+  // the other layers show only this vessel and span
+  for (const l of OTHER) applyChoice(l);
+  await tChart();
+  tSetWindow(win);
+}
+
+async function tChart() {
+  const uPlot = await loadUplot();
+  TU?.destroy();
+  TU = null;
+  const el = $("t-chart");
+  if (!TS.t.length) { $("t-info").textContent = tr("tNone"); return; }
+  // a silence longer than T_GAP breaks the line, as the map's and the lanes' runs
+  const gaps = (u, sidx, i0, i1, nullGaps) => {
+    const t = u.data[0], g = [...nullGaps];
+    for (let i = i0; i < i1; i++) if (t[i + 1] - t[i] > T_GAP)
+      g.push([Math.round(u.valToPos(t[i], "x", true)) + 1, Math.round(u.valToPos(t[i + 1], "x", true))]);
+    return g;
+  };
+  const axis = { font: "12px system-ui", stroke: "#333", grid: { stroke: "#eceff2" }, ticks: { stroke: "#c8ccd0" } };
+  // the time axis on the data's own clock, ISO dates and 24-hour times: years, months, days, or times with the date
+  // where the day changes
+  const timeTicks = (u, splits, ax, space, incr) => splits.map((v, j) => {
+    const s = tTime(v, incr < 60), p = j ? tTime(splits[j - 1]) : "";
+    if (incr >= 365 * 86400) return s.slice(0, 4);
+    if (incr >= 28 * 86400) return s.slice(0, 7);
+    if (incr >= 86400) return j === 0 || p.slice(0, 4) !== s.slice(0, 4) ? `${s.slice(5, 10)}\n${s.slice(0, 4)}` : s.slice(5, 10);
+    return j === 0 || p.slice(0, 10) !== s.slice(0, 10) ? `${s.slice(11)}\n${s.slice(0, 10)}` : s.slice(11);
+  });
+  TU = new uPlot({
+    width: el.clientWidth, height: el.clientHeight,
+    tzDate: ts => uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"),
+    legend: { show: false },
+    // room for the readout (#t-info) over the plot, and under it a row of ticks for each mark column
+    padding: [24 + (TP.marks.length > 1 ? TP.marks.length * T_MARK_ROW : 0), null, null, null],
+    cursor: { drag: { x: true, y: false }, points: { size: 8 }, dataIdx: (u, sidx, idx) => tPinned ?? idx },
+    scales: { x: { time: true } },
+    axes: [{ ...axis, values: timeTicks, size: 44, space: 70 },
+           { ...axis, scale: "y0", size: 64, stroke: T_COLS[0] },
+           ...(TP.cols.length > 1 ? [{ ...axis, scale: "y1", side: 1, size: 60, grid: { show: false }, stroke: T_COLS[1] }] : [])],
+    series: [{}, ...TP.cols.map((c, i) => ({
+      label: tr(c.label), scale: `y${i}`, stroke: T_COLS[i % T_COLS.length], width: 1.25, gaps, points: { show: false },
+      show: i === 0 || !!$("t-cols").querySelector(`[data-col="${i}"]`)?.checked
+    }))],
+    hooks: {
+      setScale: [(u, key) => { if (key === "x") tWindowFromChart(); }],
+      setCursor: [u => tHover(u.cursor.idx)],
+      draw: [u => { tDrawMarks(u); tDrawLanes(u); }]
+    }
+  }, [TS.t, ...TP.cols.map(c => TS.y[c.field])], el);
+  TU.over.addEventListener("mousemove", () => { tPinned = null; });
+}
+
+// The window: [from, to] in seconds, or null for the whole span. It is the chart's time axis, so a drag, a double click
+// and this all set it the same way
+function tSetWindow(w) {
+  if (!TU) return;
+  const t = TS.t;
+  TU.setScale("x", { min: w ? w[0] : t[0], max: w ? w[1] : t[t.length - 1] });
+}
+function tWindowFromChart() {
+  TW = [TU.scales.x.min, TU.scales.x.max];
+  cancelAnimationFrame(tFrame);
+  tFrame = requestAnimationFrame(tDrawWindow);
+}
+function tDrawWindow() {
+  if (!TS || !TW || !map.getSource("rb-time-line")) return;
+  const t = TS.t, i0 = tFind(TW[0]), i1 = tFind(TW[1], true), lines = [];
+  const n = i1 - i0, k = Math.max(1, Math.ceil(n / T_MAX)), v = TS.y[TP.cols[0].field], feats = [];
+  // the line thinned as the pings are (a long line is most of a window's time to draw), its ends at a silence kept
+  let cur = [], x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = i0; i < i1; i++) {
+    if (cur.length && t[i] - t[i - 1] > T_GAP) { if (cur.length > 1) lines.push(cur); cur = []; }
+    const x = TS.lon[i], y = TS.lat[i];
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    if (k === 1 || !cur.length || (i - i0) % k === 0 || i === i1 - 1 || t[i + 1] - t[i] > T_GAP) cur.push([x, y]);
+  }
+  if (cur.length > 1) lines.push(cur);
+  for (let i = i0; i < i1; i++) {
+    if ((i - i0) % k && !TS.mk[i]) continue;
+    const p = { i };
+    if (v[i] != null) p.v = v[i];
+    if (TS.mk[i]) { p.mk = TS.mk[i]; p.mkc = TS.mkc[i]; }
+    feats.push({ type: "Feature", geometry: { type: "Point", coordinates: [TS.lon[i], TS.lat[i]] }, properties: p });
+  }
+  map.getSource("rb-time-line").setData({ type: "Feature", geometry: { type: "MultiLineString", coordinates: lines }, properties: {} });
+  map.getSource("rb-time-pts").setData({ type: "FeatureCollection", features: feats });
+  TS.n = n; TS.k = k;
+  tInfo();
+  if (n) map.fitBounds([[x0, y0], [x1, y1]], { padding: 40, maxZoom: 15, duration: 300 });
+  writeAddress();
+}
+// the window in words, or the ping under the cursor
+function tInfo(i = null) {
+  if (!TS || !TW || TS.n == null) return;
+  const lab = TP.time_label ? ` ${TP.time_label}` : "";
+  $("t-info").textContent = i == null
+    ? tr("tWindow", tTime(TW[0]), tTime(TW[1]), lab, TS.n.toLocaleString(loc())) + (TS.k > 1 ? ` · ${tr("tThinned", TS.k)}` : "")
+    : `${tTime(TS.t[i], true)}${lab} · ` + TP.cols.map(c => `${tr(c.label)} ${tNum(TS.y[c.field][i])}`).join(" · ") +
+      (TS.mk[i] ? ` · ${TS.mk[i]}` : "");
+}
+function tHover(i) {
+  const src = map.getSource("rb-time-hover");
+  if (!src || !TS) return;
+  if (i == null || i < 0 || i >= TS.t.length) { src.setData(EMPTY); tInfo(); return; }
+  src.setData({ type: "Feature", geometry: { type: "Point", coordinates: [TS.lon[i], TS.lat[i]] }, properties: {} });
+  tInfo(i);
+}
+// the marked pings as ticks along the chart's top: one mark column as before, at the plot's top; several, each its own
+// row in its own colour, in the margin above the plot, the first on top
+function tDrawMarks(u) {
+  if (!TS || !TP.marks.length) return;
+  const dpr = devicePixelRatio, c = u.ctx, { top } = u.bbox, i0 = tFind(u.scales.x.min), i1 = tFind(u.scales.x.max, true);
+  const many = TP.marks.length > 1, h = (many ? T_MARK_ROW - 2 : 7) * dpr;
+  c.save();
+  TS.mkRows.forEach((rows, k) => {
+    const y = many ? top - (TP.marks.length - k) * T_MARK_ROW * dpr : top;
+    c.fillStyle = markColour(k);
+    let last = -9;
+    for (const i of rows) {
+      if (i < i0 || i >= i1) continue;
+      const x = Math.round(u.valToPos(TS.t[i], "x", true));
+      if (x - last >= 2) { c.fillRect(x - dpr, y, 2 * dpr, h); last = x; }
+    }
+  });
+  c.restore();
+}
+// the lanes under the chart, on the chart's time axis: each interval a bar, its label inside where it fits
+function tDrawLanes(u) {
+  const cv = $("t-lanes"), L = TP.lanes;
+  if (!L.length || !TS) return;
+  const dpr = devicePixelRatio, w = cv.clientWidth, h = L.length * LANE_H;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const c = cv.getContext("2d");
+  c.scale(dpr, dpr);
+  c.font = "12px system-ui"; c.textBaseline = "middle";
+  const off = u.over.getBoundingClientRect().left - cv.getBoundingClientRect().left, pw = u.over.clientWidth;
+  const a = u.scales.x.min, b = u.scales.x.max;
+  L.forEach((lane, k) => {
+    const d = TS.lanes?.[lane.id], y = k * LANE_H;
+    c.fillStyle = "#5f6b76"; c.textAlign = "right";
+    c.fillText(tr(lane.label), off - 6, y + LANE_H / 2, off - 8);
+    if (!d) return;
+    // a value keeps its colour along the lane, in the order the values first come in the span
+    const col = new Map();
+    for (const v of d.label ?? []) if (v != null && !col.has(v)) col.set(v, LANE_PAL[col.size % LANE_PAL.length]);
+    for (let j = 0; j < d.t0.length; j++) {
+      if (d.t1[j] < a || d.t0[j] > b) continue;
+      const x0 = off + Math.max(0, u.valToPos(d.t0[j], "x")), x1 = off + Math.min(pw, u.valToPos(d.t1[j], "x"));
+      c.fillStyle = d.label?.[j] != null ? col.get(d.label[j]) : LANE_FILL[j % 2];
+      c.fillRect(x0, y + 3, Math.max(2, x1 - x0), LANE_H - 6);
+      if (x1 - x0 > 30 && d.label?.[j] != null) {
+        c.save(); c.beginPath(); c.rect(x0, y, x1 - x0, LANE_H); c.clip();
+        c.fillStyle = "#222"; c.textAlign = "left"; c.fillText(String(d.label[j]), x0 + 3, y + LANE_H / 2);
+        c.restore();
+      }
+    }
+  });
+}
+// the interval under the pointer in the lanes, with a window around it
+function tLaneAt(e) {
+  if (!TU || !TS) return null;
+  const r = $("t-lanes").getBoundingClientRect(), lane = TP.lanes[Math.floor((e.clientY - r.top) / LANE_H)];
+  const d = lane && TS.lanes?.[lane.id];
+  if (!d) return null;
+  const x = e.clientX - TU.over.getBoundingClientRect().left, t = TU.posToVal(x, "x"), tol = TU.posToVal(x + 3, "x") - t;
+  for (let j = 0; j < d.t0.length; j++) if (d.t0[j] - tol <= t && t <= d.t1[j] + tol) {
+    const pad = Math.max(60, (d.t1[j] - d.t0[j]) * 0.05);
+    return { lane, label: d.label?.[j], t0: d.t0[j], t1: d.t1[j], pad: [d.t0[j] - pad, d.t1[j] + pad] };
+  }
+  return null;
+}
+</script>
+</body>
+</html>

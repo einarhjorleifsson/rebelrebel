@@ -1,0 +1,47 @@
+Package: rebelrebel
+Type: Package
+Title: Fast Maps on 'MapLibre' for Marine Data
+Version: 2026.11.10
+Authors@R: c(
+  person("Einar", "Hjörleifsson", role = c("aut", "cre"), email = "einar.hjorleifsson@gmail.com")
+  )
+Maintainer: Einar Hjörleifsson <einar.hjorleifsson@gmail.com>
+Description: Interactive maps of parquet files and 'DuckDB' tables, drawn in the
+    browser by 'MapLibre GL JS': vessel tracks, survey stations, gridded effort,
+    depth, relief and contours. The data stay in 'DuckDB' and reach the page as
+    vector tiles, so a map of millions of rows stays fast and its colours,
+    filters and legend change in the page. A map is served from R on the
+    local machine, or written as a folder that opens from its 'index.html'
+    with no R and no network but the base map's. Moved from the R package
+    'ramb', whose map viewer it was.
+License: GPL (>= 3)
+URL: https://github.com/einarhjorleifsson/rebelrebel
+BugReports: https://github.com/einarhjorleifsson/rebelrebel/issues
+Encoding: UTF-8
+Depends:
+    R (>= 4.1.0)
+Imports:
+    DBI,
+    dbplyr,
+    dplyr,
+    duckdb,
+    grDevices,
+    httpuv,
+    jsonlite,
+    rlang,
+    stats,
+    tibble,
+    utils
+Suggests:
+    marmap,
+    png,
+    rbibutils,
+    RSQLite,
+    rstudioapi,
+    sf,
+    testthat (>= 3.0.0),
+    withr,
+    yaml
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.0

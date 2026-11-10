@@ -1,0 +1,212 @@
+$version: 0.1.0
+$learn_more: https://data-dict.tidyverse.org/
+
+name: rebelrebel
+label: rebelrebel's example data
+description: >
+  The datasets shipped with the R package rebelrebel, one parquet file per table in its `extdata` folder, read with
+  `rr_example("<table>")`. Each file also carries its own entry of this dictionary, its citation in BibTeX and its
+  licence in its parquet metadata, as written by the R package ramb, where these files were made.
+details: >
+  Positions are longitude and latitude in decimal degrees on WGS 84 unless a column says otherwise. Shapes are DuckDB
+  GEOMETRY, written as GeoParquet (OGC:CRS84, longitude first). The sources are cited on each table's **Cite:** line by
+  their keys in the package's `REFERENCES.bib`; the licence is on its **Licence:** line, and the package's `COPYRIGHTS`
+  file repeats both. The files and their entries were copied from ramb on 2026-11-10.
+origin: https://github.com/einarhjorleifsson/ramb/tree/main/data-raw
+version:
+  date: 2026-11-10
+
+tables:
+  - name: dansk
+    label: Danish vessel tracks (AIS)
+    description: >
+      Each row is an AIS position of one of 14 Danish fishing vessels with four gears, a median 10 s apart, from
+      December 2012 to October 2020, with an expert's label of fishing or other.
+    details: |
+      **Cite:** [@ices2022wkssfgeo; @wkssfgeo_github]
+
+      **Licence:** MIT, Copyright (c) 2021 ICES Expert Groups.
+
+      **Changes:** `data-examples/example_data_AIS.csv` of the WKSSFGEO repository, with repeated (vessel_id,
+      time_stamp) rows dropped and `.rowid` added (`data-raw/DATASET.R`).
+    source:
+      parquet: dansk.parquet
+    origin: https://github.com/einarhjorleifsson/ramb/blob/main/data-raw/DATASET.R
+    columns:
+      - name: .rowid
+        type: number(id)
+        constraints: [primary_key]
+        description: Row number, in the order of vessel and time.
+        examples: [1254, 92947, 199154, 295985, 388863]
+      - name: vessel_id
+        type: string
+        description: The vessel, anonymised.
+        examples: [EX_1, EX_12, EX_3, EX_6, EX_9]
+      - name: time_stamp
+        type: datetime
+        time_zone: naive
+        description: Time of the position, as given; the source states no zone.
+        range: [2012-12-03T04:53:58, 2020-10-25T17:36:28]
+      - name: lon
+        type: number(quantity)
+        units: degrees east
+        description: Longitude.
+        range: [2.72533083, 12.85676967]
+      - name: lat
+        type: number(quantity)
+        units: degrees north
+        description: Latitude.
+        range: [54.536601, 58.36065733]
+      - name: speed
+        type: number(quantity)
+        units: knots
+        description: Speed over ground, knots.
+        range: [0, 11.596]
+      - name: course
+        type: number(quantity)
+        units: degrees
+        description: Course over ground, degrees, as given; a few values above 360 (up to 33,098) are errors of the source.
+        range: [0, 33098]
+      - name: gear
+        type: enum
+        description: The gear the vessel used.
+        values:
+          GN: gillnet, not specified
+          GNS: set gillnet
+          GTR: trammel net
+          OTB: bottom otter trawl
+      - name: behaviour
+        type: enum
+        description: The expert's label of the position.
+        values: [Fishing, Other]
+
+  - name: dansk_harbours
+    label: Harbour polygons for the Danish tracks
+    description: Each row is a harbour, as a polygon; 942 harbours, most of them in Europe.
+    details: |
+      **Cite:** [@ices2022wkssfgeo; @wkssfgeo_github]
+
+      **Licence:** MIT, Copyright (c) 2021 ICES Expert Groups.
+
+      **Changes:** `data/harbours.rds` of the WKSSFGEO repository, with the id `SI_HARB` added (`data-raw/DATASET.R`).
+    source:
+      parquet: dansk_harbours.parquet
+    origin: https://github.com/einarhjorleifsson/ramb/blob/main/data-raw/DATASET.R
+    columns:
+      - name: SI_HARB
+        type: number(id)
+        constraints: [primary_key]
+        description: The harbour, a sequential id.
+        examples: [4, 252, 479, 700, 924]
+      - name: geometry
+        description: The harbour's polygon (POLYGON), DuckDB GEOMETRY, longitude and latitude on WGS 84.
+
+  - name: dansk_relief
+    label: Seabed and land elevation around the Danish tracks
+    description: >
+      Each row is a cell of a grid of elevations, 30 arc-seconds square, over the box of the Danish pings (2.5-13 E,
+      54.5-58.5 N): the depth of the North Sea, the Skagerrak, the Kattegat and the western Baltic, and the height of
+      the land around them; 1,260 by 480 cells.
+    details: |
+      **Cite:** [@etopo2022; @marmap]
+
+      **Licence:** Public domain: a work of NOAA, an agency of the United States government; NOAA NCEI asks that it be
+      cited.
+
+      **Changes:** ETOPO 2022's 15 arc-second bed elevation, read with marmap's `getNOAA.bathy()` at 30 arc-seconds
+      (each cell one of the model's, sampled by NOAA's image service, not their mean), with each cell placed at its
+      centre (marmap labels them from the box's edge to its edge) and the elevation stored as a 32-bit number
+      (`data-raw/dansk_relief.R`, 2026-11-09).
+    source:
+      parquet: dansk_relief.parquet
+    origin: https://github.com/einarhjorleifsson/ramb/blob/main/data-raw/dansk_relief.R
+    columns:
+      - name: lon
+        type: number(quantity)
+        units: degrees east
+        description: Longitude of the cell's centre.
+        range: [2.504167, 12.995833]
+      - name: lat
+        type: number(quantity)
+        units: degrees north
+        description: Latitude of the cell's centre.
+        range: [54.504167, 58.495833]
+      - name: elevation
+        type: number(quantity)
+        units: metres
+        description: >
+          Elevation of the seabed or the land, negative below sea level (ETOPO 2022's heights are to the EGM2008
+          geoid); 460,862 of the cells are below sea level.
+        range: [-699.76, 652.78]
+
+  - name: trawlsurvey
+    label: Icelandic groundfish survey, March 2019, vessel tracks
+    description: >
+      Each row is a position of one of four vessels on the Icelandic groundfish survey in March (SMB), 27 February to
+      20 March 2019, with whether a survey tow was on.
+    details: |
+      **Cite:** [@mfri_smb2019]
+
+      **Licence:** MFRI data, shipped by its maintainer at MFRI; the terms are not stated here.
+
+      **Changes:** extracted from MFRI's database (`data-raw/DATASET.R`).
+    todo: Confirm the licence of the survey data with MFRI.
+    source:
+      parquet: trawlsurvey.parquet
+    origin: https://github.com/einarhjorleifsson/ramb/blob/main/data-raw/DATASET.R
+    columns:
+      - name: vid
+        type: number(id)
+        description: The vessel's Icelandic registry number.
+        examples: [1131, 1277, 1281, 2350]
+      - name: lon
+        type: number(quantity)
+        units: degrees east
+        description: Longitude.
+        range: [-27.2523649996984, -10.5566666684504]
+      - name: lat
+        type: number(quantity)
+        units: degrees north
+        description: Latitude.
+        range: [63.0193333345664, 67.3293333310739]
+      - name: speed
+        type: number(quantity)
+        units: knots
+        description: Speed over ground, knots.
+        range: [0, 12.8999999999352]
+      - name: heading
+        type: number(quantity)
+        units: degrees
+        description: Heading, degrees.
+        range: [0, 359.899999998419]
+      - name: time
+        type: datetime
+        time_zone: naive
+        description: Time of the position, Icelandic time, which is UTC all year.
+        range: [2019-02-27T08:07:46, 2019-03-20T09:11:34]
+      - name: behaviour
+        type: enum
+        description: Whether a survey tow was on.
+        values: [hauling, not hauling]
+
+  - name: trawlsurveytows
+    label: Icelandic groundfish survey, March 2019, tows
+    description: Each row is a tow of the same survey, as a line from its start to its end; 581 tows.
+    details: |
+      **Cite:** [@mfri_smb2019]
+
+      **Licence:** MFRI data, shipped by its maintainer at MFRI; the terms are not stated here.
+
+      **Changes:** extracted from MFRI's database (`data-raw/DATASET.R`).
+    todo: Confirm the licence of the survey data with MFRI.
+    source:
+      parquet: trawlsurveytows.parquet
+    origin: https://github.com/einarhjorleifsson/ramb/blob/main/data-raw/DATASET.R
+    columns:
+      - name: id.lgs
+        type: number(id)
+        constraints: [primary_key]
+        description: The tow's station id in MFRI's database.
+        examples: [490561, 490738, 490972, 491083, 491261]
+      - name: geometry
+        description: The tow (LINESTRING), DuckDB GEOMETRY, longitude and latitude on WGS 84.

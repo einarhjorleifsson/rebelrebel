@@ -1,0 +1,218 @@
+# example.R — the example data in inst/extdata, read lazily; their documentation from inst/extdata/data-dict.yaml.
+# Copied from ramb's R/example.R on 2026-11-10.
+
+#' Read an example dataset shipped with rebelrebel
+#'
+#' rebelrebel's example data are parquet files in its `extdata` folder, opened lazily as DuckDB tables; collect one
+#' with [dplyr::collect()]. Each dataset has its own help page (`?dansk`, `?dansk_relief`, ...): what a row is, its
+#' columns, its sources and its licence. The same is in the folder's data dictionary, `data-dict.yaml`
+#' (<https://data-dict.tidyverse.org/>), and in each file's own parquet metadata, so a file copied out of the package
+#' still says what it is. The sources are BibTeX entries in the package's `REFERENCES.bib`. The files were made by the
+#' R package ramb, whose `data-raw` folder holds the scripts.
+#'
+#' The two datasets with shapes (`dansk_harbours`, `trawlsurveytows`) hold them in `geometry` as DuckDB's GEOMETRY
+#' (GeoParquet, longitude and latitude on WGS 84), which DuckDB's `ST_` functions work on. Collected into R it is
+#' WKB; for sf: `x <- dplyr::collect(rr_example("dansk_harbours"))`, then
+#' `sf::st_sf(x[names(x) != "geometry"], geometry = sf::st_as_sfc(structure(x$geometry, class = "WKB"), crs = 4326))`.
+#'
+#' @param name The dataset's name; `NULL` for the catalogue of all of them.
+#' @param con A DuckDB connection to open the dataset on; rebelrebel's own by default. Lazy tables used together
+#'   must share a connection, so give the one your other tables are on (`dbplyr::remote_con()` of one of them).
+#' @return A lazy DuckDB table; or, for `name = NULL`, a tibble with one row per dataset: `name`, `label`,
+#'   `description`, `rows`, `licence`, `cite` (its sources as text) and `bibtex` (the same as BibTeX), read from the
+#'   files' own metadata.
+#' @export
+#' @examples
+#' rr_example()
+#' rr_example("dansk_harbours")
+#' cat(rr_example()$bibtex[1])
+rr_example <- function(name = NULL, con = NULL) {
+  dir <- system.file("extdata", package = "rebelrebel")
+  have <- sub("\\.parquet$", "", list.files(dir, pattern = "\\.parquet$"))
+  if (is.null(name)) {
+    return(.rr_catalogue(dir))
+  }
+  if (!is.character(name) || length(name) != 1 || !name %in% have) {
+    stop(
+      sprintf(
+        "`name` must be one of %s.",
+        paste0("\"", have, "\"", collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  .rr_read_parquet(
+    file.path(dir, paste0(name, ".parquet")),
+    lazy = TRUE,
+    con = con
+  )
+}
+
+# The catalogue: what data-raw/data_dict.R stamped into each file's parquet metadata, one row per file.
+.rr_catalogue <- function(dir) {
+  files <- list.files(dir, pattern = "\\.parquet$", full.names = TRUE)
+  for (f in files) {
+    .rr_read_parquet(f, lazy = TRUE) # stops on a Git LFS pointer, with a message that says so
+  }
+  con <- .rr_connection()
+  glob <- file.path(dir, "*.parquet")
+  # the files' own stamps, written by ramb, which made them (keys 'ramb.*')
+  kv <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT parse_filename(file_name, true) AS file, decode(key) AS key, decode(value) AS value
+       FROM parquet_kv_metadata('%s') WHERE decode(key) LIKE 'ramb.%%'",
+      glob
+    )
+  )
+  n <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT parse_filename(file_name, true) AS file, num_rows FROM parquet_file_metadata('%s')",
+      glob
+    )
+  )
+  get <- function(file, key) {
+    v <- kv$value[kv$file == file & kv$key == paste0("ramb.", key)]
+    if (length(v) == 1) enc2utf8(v) else NA_character_
+  }
+  out <- tibble::tibble(name = sort(sub("\\.parquet$", "", basename(files))))
+  for (k in c("label", "description")) {
+    out[[k]] <- vapply(out$name, get, "", key = k, USE.NAMES = FALSE)
+  }
+  out$rows <- as.integer(n$num_rows[match(out$name, n$file)])
+  for (k in c("licence", "cite", "bibtex")) {
+    out[[k]] <- vapply(out$name, get, "", key = k, USE.NAMES = FALSE)
+  }
+  out
+}
+
+# Roxygen lines for one dataset's help page (@eval in R/datasets.R), from its entry in inst/extdata/data-dict.yaml and
+# its sources in inst/REFERENCES.bib. It runs when the package is documented, never when it is used, so yaml and
+# rbibutils are in Suggests.
+.rr_dataset_rd <- function(name) {
+  # read_yaml() re-encodes to the session's encoding and, outside a UTF-8 locale, stops at the first non-ASCII
+  # character without an error, dropping the datasets after it
+  dd <- yaml::yaml.load(readLines(
+    system.file("extdata", "data-dict.yaml", package = "rebelrebel"),
+    encoding = "UTF-8"
+  ))
+  t <- Filter(function(x) identical(x$name, name), dd$tables)[[1]]
+  bib <- rbibutils::readBib(
+    system.file("REFERENCES.bib", package = "rebelrebel"),
+    direct = TRUE
+  )
+  for (i in seq_along(bib)) {
+    if (!is.null(bib[[i]]$doi)) bib[[i]]$url <- NULL
+  }
+  # a labelled paragraph of `details` (**Cite:**, **Licence:**, **Changes:**), its lines joined
+  line_of <- function(label) {
+    para <- gsub("\\s*\\n\\s*", " ", strsplit(t$details, "\\n\\s*\\n")[[1]])
+    l <- grep(sprintf("^\\s*\\*\\*%s:\\*\\*", label), para, value = TRUE)
+    trimws(sub(sprintf("^\\s*\\*\\*%s:\\*\\*", label), "", l))
+  }
+  esc <- function(x) gsub("%", "\\\\%", trimws(x))
+  keys <- regmatches(
+    line_of("Cite"),
+    gregexpr("(?<=@)[A-Za-z0-9_]+", line_of("Cite"), perl = TRUE)
+  )[[1]]
+  op <- options(useFancyQuotes = FALSE)
+  on.exit(options(op))
+  rows <- DBI::dbGetQuery(
+    .rr_connection(),
+    sprintf(
+      "SELECT num_rows FROM parquet_file_metadata('%s')",
+      system.file("extdata", t$source$parquet, package = "rebelrebel")
+    )
+  )$num_rows
+  col <- function(c) {
+    what <- if (is.null(c$description)) {
+      ""
+    } else {
+      esc(gsub("\n", " ", c$description))
+    }
+    if (!is.null(c$units)) {
+      what <- paste0(what, " Unit: ", c$units, ".")
+    }
+    if (!is.null(c$values) && !is.null(names(c$values))) {
+      what <- paste0(
+        what,
+        " Values: ",
+        paste0("`", names(c$values), "` ", unlist(c$values), collapse = "; "),
+        "."
+      )
+    } else if (!is.null(c$values)) {
+      what <- paste0(
+        what,
+        " Values: ",
+        paste0("`", unlist(c$values), "`", collapse = ", "),
+        "."
+      )
+    }
+    sprintf("* `%s`: %s", c$name, what)
+  }
+  c(
+    paste("@title", t$label),
+    paste("@name", name),
+    paste0(
+      "@description ",
+      esc(gsub("\n", " ", t$description)),
+      " Read it with `rr_example(\"",
+      name,
+      "\")`."
+    ),
+    paste0(
+      "@format A parquet file of ",
+      format(rows, big.mark = ","),
+      " rows in the package's `extdata` folder, `",
+      t$source$parquet,
+      "`, with the columns:"
+    ),
+    "",
+    vapply(t$columns, col, ""),
+    "",
+    paste("@details", esc(gsub("\n", " ", line_of("Changes")))),
+    paste0(
+      "@source ",
+      paste(esc(format(bib[keys], style = "text")), collapse = "\n\n"),
+      "\n\nLicence: ",
+      esc(line_of("Licence"))
+    ),
+    "@family example data",
+    "@keywords datasets",
+    "@seealso [rr_example()]; the data dictionary `data-dict.yaml` in the package's `extdata` folder."
+  )
+}
+
+# One of the package's parquet files, lazy or collected.
+.rr_read_parquet <- function(f, lazy = FALSE, con = NULL) {
+  if (.rr_is_lfs_pointer(f)) {
+    stop(
+      sprintf(
+        "%s is a Git LFS pointer, not the data: install rebelrebel from a clone with Git LFS, or from an archive that includes LFS objects.",
+        basename(f)
+      ),
+      call. = FALSE
+    )
+  }
+  # a query, not a view: duckdbfs::open_dataset() named its view from R's random numbers, which moved the caller's
+  # random stream, and left the view on the connection
+  if (is.null(con)) {
+    con <- .rr_connection()
+  }
+  x <- dplyr::tbl(
+    con,
+    dplyr::sql(sprintf(
+      "SELECT * FROM read_parquet(%s)",
+      DBI::dbQuoteString(con, f)
+    ))
+  )
+  if (lazy) x else dplyr::collect(x)
+}
+
+# A Git LFS pointer instead of the data: what a package built from an archive without its LFS objects holds.
+.rr_is_lfs_pointer <- function(f) {
+  head <- readBin(f, "raw", 23)
+  identical(head, charToRaw("version https://git-lfs"))
+}
+
