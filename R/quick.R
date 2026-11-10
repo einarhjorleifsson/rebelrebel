@@ -149,6 +149,7 @@
           v <- r$v[j]
           list(
             value = key(v, i),
+            text = if (is.na(v)) "none" else key(v, i), # the value alone, for the page's counts as the lists narrow
             label = sprintf(
               "%s (%s)",
               if (is.na(v)) "none" else key(v, i),
@@ -189,6 +190,7 @@
           ),
           collapse = intToUtf8(31)
         ),
+        n = r$n[j], # the rows of the combination, for the linked lists' counts
         bbox = box(r, j)
       )
     })

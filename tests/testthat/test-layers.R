@@ -142,6 +142,23 @@ test_that("rr_map(data, choose = ) names the columns the reader picks", {
   expect_null(rr_point(g)$config$choose)
 })
 
+test_that("two lists are linked by the combinations the data hold, with their rows", {
+  skip_if_no_spatial()
+  x <- rr_example("trawlsurvey") |> dplyr::mutate(day = as.character(as.Date(time)))
+  ch <- (rr_map(x, choose = c(vid, day)) |> rr_point())$config$choose
+  rows <- dplyr::pull(dplyr::count(x), n)
+  # each option's value alone, for the page's counts as the lists narrow
+  expect_equal(ch$fields[[1]]$options[[1]]$text, ch$fields[[1]]$options[[1]]$value)
+  # every combination once, its rows summing to the table's
+  keys <- vapply(ch$extents, `[[`, "", "key")
+  expect_false(anyDuplicated(keys) > 0)
+  expect_equal(sum(vapply(ch$extents, `[[`, 0, "n")), rows)
+  # a vessel's combinations are its days
+  truth <- dplyr::collect(dplyr::distinct(dplyr::filter(x, vid == 1131), day))$day
+  mine <- sub("^1131\u001f", "", grep("^1131\u001f", keys, value = TRUE))
+  expect_setequal(mine, truth)
+})
+
 test_that("lines, segments, areas and text: their style, legend and data", {
   skip_if_no_spatial()
   m <- rr_map(rr_example("trawlsurveytows")) |> rr_line(name = "Tows", hover = id.lgs, linewidth = 3)

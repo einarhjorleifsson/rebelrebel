@@ -1,3 +1,10 @@
+# rebelrebel 2026.11.10.4
+
+* `choose`'s lists are linked: each offers only the values the other lists' choices leave, from the combinations the
+  data hold, with their rows counted again; a choice the others no longer leave goes back to all, the last list first
+  (a trip gives way to its vessel), and ‹ and › step through the values left. So `choose = c(vid, tid)` needs no
+  nesting declared: a vessel chosen leaves its trips.
+
 # rebelrebel 2026.11.10.3
 
 * A click shows the feature's row as a table: the tiles carry the row's number and title only, and the server answers

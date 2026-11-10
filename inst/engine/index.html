@@ -1169,6 +1169,7 @@ Promise.all([BUNDLE ? BUNDLE.meta : fetch("/meta").then(r => r.json()), styleLoa
     const vals = (q.get(f.field) ?? "").split(",").filter(v => f.options.some(o => o.value === v));
     if (vals.length) setChosen(i, f.multi ? vals : vals.slice(0, 1));
   });
+  linkChoices(-1);
   FONT = map.getStyle().layers.find(l => l.type === "symbol" && l.layout?.["text-font"])?.layout["text-font"] ?? FONT;
   if (G) {
     const firstSymbol = map.getStyle().layers.find(l => l.type === "symbol")?.id;
@@ -1421,18 +1422,64 @@ function zoomToChoice(i) {
   }
   if (box) map.fitBounds([[box[0], box[1]], [box[2], box[3]]], { padding: 40, maxZoom: 14 });
 }
+// The lists linked: each offers only the values the other lists' choices leave, from the combinations the data hold
+// (`extents`), its counts the rows left; a choice the others no longer leave goes back to all. So a list of trips
+// after a list of vessels holds the chosen vessel's trips, and a gear chosen leaves the years it fished.
+const COMBOS = (CONFIG.choose?.extents ?? []).map(e => ({ vals: e.key.split("\u001f"), n: e.n ?? 0 }));
+function offered(i, sets) {
+  if (CHOOSE.length < 2 || !COMBOS.length) return null;
+  const count = new Map();
+  for (const c of COMBOS) {
+    if (sets.every((s, j) => j === i || s === null || s.includes(c.vals[j]))) count.set(c.vals[i], (count.get(c.vals[i]) ?? 0) + c.n);
+  }
+  return count;
+}
+function linkChoices(changed) {
+  if (CHOOSE.length < 2 || !COMBOS.length) return;
+  // a choice the others no longer leave goes back to all, the last list first, so that a trip gives way to its vessel;
+  // a list put back to all only widens the others, so one pass leaves the choices that remain together in the data
+  for (let i = CHOOSE.length - 1; i >= 0; i--) {
+    const s = chosen(i);
+    if (i === changed || s === null) continue;
+    const count = offered(i, CHOOSE.map((f, j) => chosen(j)));
+    if (!s.some(v => count.has(v))) setChosen(i, null);
+  }
+  const sets = CHOOSE.map((f, j) => chosen(j));
+  CHOOSE.forEach((f, i) => {
+    const count = offered(i, sets), el = $("ch-" + i);
+    const text = o => `${o.text} (${count.get(o.value).toLocaleString(loc())})`;
+    for (const o of f.options) {
+      const on = count.has(o.value);
+      if (f.multi) {
+        const x = el.querySelector(`input[value="${CSS.escape(o.value)}"]`)?.parentElement;
+        if (!x) continue;
+        x.hidden = !on;
+        if (on && o.text !== undefined) x.lastChild.textContent = text(o);
+      } else {
+        const x = [...el.options].find(p => p.value === o.value);
+        if (!x) continue;
+        x.hidden = x.disabled = !on;
+        if (on && o.text !== undefined) x.textContent = text(o);
+      }
+    }
+  });
+}
 function onChoice(i) {
   popup?.remove();
+  linkChoices(i);
   for (const l of OTHER) applyChoice(l);
   zoomToChoice(i);
 }
 CHOOSE.forEach((f, i) => $("ch-" + i).addEventListener("change", () => onChoice(i)));
 // ‹ and › show one value: the next or previous of the one shown, else the first or the last; all shows every value
 for (const b of document.querySelectorAll("[data-step]")) b.addEventListener("click", () => {
-  const i = +b.dataset.ch, f = CHOOSE[i], n = f.options.length, cur = chosen(i);
+  const i = +b.dataset.ch, f = CHOOSE[i], cur = chosen(i);
+  // the values the other lists leave, in order
+  const count = offered(i, CHOOSE.map((g, j) => chosen(j))), opts = count ? f.options.filter(o => count.has(o.value)) : f.options;
+  const n = opts.length;
   if (n < 1) return;
-  const at = cur !== null && cur.length === 1 ? f.options.findIndex(o => o.value === cur[0]) : -1;
-  setChosen(i, [f.options[at < 0 ? (+b.dataset.step > 0 ? 0 : n - 1) : (at + +b.dataset.step + n) % n].value]);
+  const at = cur !== null && cur.length === 1 ? opts.findIndex(o => o.value === cur[0]) : -1;
+  setChosen(i, [opts[at < 0 ? (+b.dataset.step > 0 ? 0 : n - 1) : (at + +b.dataset.step + n) % n].value]);
   onChoice(i);
   writeAddress();
 });
