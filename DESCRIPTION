@@ -1,7 +1,7 @@
 Package: rebelrebel
 Type: Package
 Title: Fast Maps on 'MapLibre' for Marine Data
-Version: 2026.11.10.8
+Version: 2026.11.11
 Authors@R: c(
   person("Einar", "Hjörleifsson", role = c("aut", "cre"), email = "einar.hjorleifsson@gmail.com")
   )
@@ -41,6 +41,7 @@ Suggests:
     RSQLite,
     rstudioapi,
     sf,
+    terra,
     testthat (>= 3.0.0),
     withr,
     yaml

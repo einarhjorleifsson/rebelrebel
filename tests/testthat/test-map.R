@@ -665,6 +665,12 @@ test_that("elevation tiles from a grid: Terrarium images that decode to the grid
   expect_equal(attr(tiles, "format"), "png")
   expect_equal(attr(tiles, "encoding"), "terrarium")
   expect_equal(attr(tiles, "maxzoom"), 6L) # a pixel no wider than a cell of 0.02 degrees: 360 / (512 * 2^6)
+  # a fine grid stops at zoom 8 unless asked deeper; a minzoom deeper than 8 is kept
+  fine <- expand.grid(lon = seq(10, 10.01, by = 0.0005), lat = seq(56, 56.01, by = 0.0005))
+  fine$elevation <- -50
+  expect_equal(attr(rr_tiles_dem(fine), "maxzoom"), 8L) # its own limit is 11
+  expect_equal(attr(rr_tiles_dem(fine, maxzoom = 11), "maxzoom"), 11L)
+  expect_equal(attr(rr_tiles_dem(fine, minzoom = 9), "maxzoom"), 9L)
   t <- tile_of(10.2, 56.15, 9)
   z <- t[["z"]]
   tx <- t[["x"]]
@@ -757,47 +763,137 @@ test_that("elevation tiles from a grid: Terrarium images that decode to the grid
   expect_identical(ok$body, tiles(z, tx, ty))
   expect_identical(get(app, sprintf("/tiles/relief/%d/0/0.png", z))$body, tiles(z, 0, 0))
 
-  # the tiles' fit: the view's floor and cap at its 2nd and 98th percentiles, 25 quantiles between, the shading's
-  # intensity from the slope; a depth's values (the sea), or an elevation's (the land), none where there are none
+  # the tiles' fit is made in the page, from the tiles in view: a layer on them takes it where it is given none
+  # (colours in equal shares, the shading and the contours following the view), the map carries its rules, and the
+  # server has no fit to answer; a layer given its own function keeps it; `fit = TRUE` asks the page's of any tiles;
+  # tiles with no fit leave the scale on log
   d <- expand.grid(lon = seq(10, 10.4, by = 0.01), lat = seq(56, 56.3, by = 0.01))
   d$elevation <- -(1 + 100 * (d$lon - 10) / 0.4) # 1 to 101 m deep, west to east
   dt <- rr_tiles_dem(d)
-  f <- attr(dt, "fit")(10, 56, 10.4, 56.3)
-  q <- unname(stats::quantile(-d$elevation, c(0.02, 0.98))) # DuckDB's quantile_cont is R's type 7
-  expect_equal(f$floor, max(1, signif(q[1], 2)))
-  expect_equal(f$cap, max(f$floor * 1.5, signif(q[2], 2)))
-  expect_length(f$quantiles, 25)
-  expect_false(is.unsorted(f$quantiles))
-  expect_true(f$exaggeration >= 0.3 && f$exaggeration <= 1)
-  expect_lt(attr(dt, "fit")(10, 56, 10.1, 56.3)$cap, 30) # the view's own: the shallow west only
-  expect_null(attr(dt, "fit")(10, 56, 10.4, 56.3, of = "elevation")) # no land
-  expect_null(attr(dt, "fit")(-30, 60, -20, 65)) # off the grid
-
-  # a layer on these tiles takes their fit where it is given none: colours in equal shares, the shading and the
-  # contours following the view; one given its own fit keeps it; tiles with no fit leave the scale on log
+  expect_identical(attr(dt, "fit"), "page")
   colour_style <- list(list(id = "depth-colour", type = "color-relief"))
   dl <- rr_layer("depth", "dem", tiles = dt, style = colour_style, colour = TRUE)
   expect_equal(dl$config$colour[c("scale", "fit")], list(scale = "equal", fit = TRUE))
-  expect_equal(dl$fit(10, 56, 10.4, 56.3), f)
+  expect_identical(dl$config$fit, "page")
+  expect_identical(dl$fit, "page")
   expect_equal(rr_layer("depth", "dem", tiles = dt, style = colour_style,
                             colour = list(scale = "log"))$config$colour$scale, "log")
   own <- function(west, south, east, north) list(floor = 5, cap = 50)
-  expect_identical(rr_layer("depth", "dem", tiles = dt, style = colour_style, colour = list(fit = own))$fit, own)
+  ol <- rr_layer("depth", "dem", tiles = dt, style = colour_style, colour = list(fit = own))
+  expect_identical(ol$fit, own)
+  expect_null(ol$config$fit)
   rl <- rr_layer("relief", "dem", tiles = dt, style = list(list(id = "relief-shade", type = "hillshade")),
                      shade = TRUE)
   expect_true(rl$config$shade$fit)
+  expect_identical(rl$config$fit, "page")
   cl <- rr_layer("contours", "contour", tiles = dt, contours = list(thresholds = list("5" = 10), multiplier = -1),
                      style = list(list(id = "contours-line", type = "line", "source-layer" = "contours")))
   expect_true(cl$config$contours$fit)
-  expect_equal(cl$fit(10, 56, 10.4, 56.3)$quantiles, f$quantiles)
-  expect_equal(
-    rr_layer("depth", "dem", tiles = function(z, x, y) NULL, style = colour_style, colour = TRUE)$config$colour$scale,
-    "log"
+  expect_identical(cl$config$fit, "page")
+  bare <- function(z, x, y) NULL
+  expect_equal(rr_layer("depth", "dem", tiles = bare, style = colour_style, colour = TRUE)$config$colour$scale, "log")
+  tl <- rr_layer("depth", "dem", tiles = bare, style = colour_style, colour = list(fit = TRUE))
+  expect_equal(tl$config$colour[c("scale", "fit")], list(scale = "equal", fit = TRUE))
+  expect_identical(tl$config$fit, "page")
+  expect_error(rr_layer("depth", "dem", tiles = dt, style = colour_style, colour = list(fit = "yes")),
+               "is TRUE \\(made in the page")
+  m <- rr_map(rr_section("g", "G", list(dl)))
+  expect_equal(m$config$fit, .rr_map_bundle_fit(list()))
+  expect_null(rr_map(rr_section("g", "G", list(ol)))$config$fit)
+  app <- .rr_map_app(m)
+  expect_equal(get(app, "/fit/depth", "bbox=10,56,10.4,56.3")$status, 404L)
+  expect_equal(get(.rr_map_app(rr_map(rr_section("g", "G", list(ol)))), "/fit/depth", "bbox=10,56,10.4,56.3")$status,
+               200L)
+})
+
+test_that("elevation tiles from a raster: a GeoTIFF in any projection, a SpatRaster, a layer named; read where it is", {
+  skip_if_not_installed("png")
+  skip_if_not_installed("terra")
+  decode <- function(b) {
+    a <- png::readPNG(b) * 255
+    a[,, 1] * 256 + a[,, 2] + a[,, 3] / 256 - 32768
+  }
+  plane <- function(lon, lat) -50 + 100 * (lon - 10) - 200 * (lat - 56)
+  g <- expand.grid(lon = seq(10, 10.4, by = 0.02), lat = seq(56, 56.3, by = 0.01))
+  g$elevation <- plane(g$lon, g$lat)
+  t <- tile_of(10.2, 56.15, 9)
+  z <- t[["z"]]
+  tx <- t[["x"]]
+  ty <- t[["y"]]
+  # the data frame's grid as a GeoTIFF gives the same tiles
+  r <- terra::rast(g, type = "xyz", crs = "EPSG:4326")
+  f <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(r, f)
+  from_file <- rr_tiles_dem(f)
+  expect_identical(from_file(z, tx, ty), rr_tiles_dem(g)(z, tx, ty))
+  expect_equal(attr(from_file, "bounds"), c(9.99, 55.995, 10.41, 56.305))
+  expect_identical(attr(rr_tiles_dem(f), "source"), attr(from_file, "source")) # layers on one file share its tiles
+  expect_identical(rr_tiles_dem(r)(z, tx, ty), from_file(z, tx, ty))
+  # a projected grid (Lambert azimuthal, metres): a plane in its own coordinates comes out at the pixels within a few
+  # centimetres, each warped from the grid once (GDAL's bilinear warp of a projected grid is off by about 0.013 m here,
+  # about 6 m of position on cells of 500 m; a grid in longitude and latitude, above, is exact)
+  laea <- terra::rast(
+    nrows = 60, ncols = 60, crs = "EPSG:3035",
+    xmin = 4.30e6, xmax = 4.30e6 + 60 * 500, ymin = 3.66e6, ymax = 3.66e6 + 60 * 500
   )
-  app <- .rr_map_app(rr_map(rr_section("g", "G", list(dl))))
-  fr <- get(app, "/fit/depth", "bbox=10,56,10.4,56.3")
-  expect_equal(fr$status, 200L)
-  expect_equal(jsonlite::fromJSON(fr$body)$cap, f$cap)
+  xy <- terra::xyFromCell(laea, seq_len(terra::ncell(laea)))
+  pl <- function(x, y) -100 + 0.002 * (x - 4.30e6) - 0.001 * (y - 3.66e6)
+  terra::values(laea) <- pl(xy[, 1], xy[, 2])
+  fl <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(laea, fl)
+  tl <- rr_tiles_dem(fl)
+  b <- attr(tl, "bounds")
+  expect_true(b[1] < b[3] && b[2] < b[4])
+  expect_equal(attr(tl, "maxzoom"), 7L) # at 56 N zoom 7's pixels, about 340 m, are the first no wider than 500 m
+  mid <- tile_of((b[1] + b[3]) / 2, (b[2] + b[4]) / 2, 10)
+  E <- decode(tl(10, mid[["x"]], mid[["y"]]))
+  S <- 512
+  p <- (seq_len(S) - 0.5) / S
+  lon <- (mid[["x"]] + p) / 2^10 * 360 - 180
+  lat <- atan(sinh(pi * (1 - 2 * (mid[["y"]] + p) / 2^10))) * 180 / pi
+  pts <- terra::project(terra::vect(cbind(rep(lon, S), rep(lat, each = S)), crs = "EPSG:4326"), "EPSG:3035")
+  pxy <- terra::crds(pts)
+  truth <- matrix(pl(pxy[, 1], pxy[, 2]), S, S, byrow = TRUE)
+  inside <- matrix(pxy[, 1] > 4.30e6 + 250 & pxy[, 1] < 4.33e6 - 250 & pxy[, 2] > 3.66e6 + 250 & pxy[, 2] < 3.69e6 - 250,
+                   S, S, byrow = TRUE)
+  expect_gt(mean(inside), 0.5)
+  expect_lt(max(abs(E - truth)[inside]), 0.05)
+  # a raster of several layers: `elevation` names the one drawn
+  two <- c(r, r * 2)
+  names(two) <- c("elevation", "double")
+  expect_identical(rr_tiles_dem(two)(z, tx, ty), from_file(z, tx, ty))
+  expect_identical(decode(rr_tiles_dem(two, elevation = "double")(z, tx, ty)) <= 0, decode(from_file(z, tx, ty)) <= 0)
+  names(two) <- c("a", "b")
+  expect_error(rr_tiles_dem(two), "2 layers \\(a, b\\): `elevation` names the one drawn")
+  # a file's overviews are read only where a pixel spans eight cells or more: at zoom 4, where a pixel spans two to four
+  # cells of 0.01 degrees, the tile of a file with overviews is the tile of the same grid without, though GDAL's warp
+  # alone would have taken them
+  if (requireNamespace("sf", quietly = TRUE)) {
+    rough <- terra::rast(nrows = 200, ncols = 200, xmin = 10, xmax = 12, ymin = 56, ymax = 58, crs = "EPSG:4326")
+    terra::values(rough) <- withr::with_seed(1, -100 - stats::runif(40000, 0, 50))
+    plain <- withr::local_tempfile(fileext = ".tif")
+    terra::writeRaster(rough, plain)
+    pyramid <- withr::local_tempfile(fileext = ".tif")
+    terra::writeRaster(rough, pyramid)
+    utils::capture.output(sf::gdal_addo(pyramid, overviews = c(2, 4, 8), method = "average")) # its progress, quietly
+    t4 <- tile_of(11, 57, 4)
+    expect_identical(rr_tiles_dem(pyramid)(4, t4[["x"]], t4[["y"]]), rr_tiles_dem(plain)(4, t4[["x"]], t4[["y"]]))
+    m4 <- 2 * pi * 6378137 / 2^4
+    tpl <- terra::rast(nrows = 512, ncols = 512, crs = "EPSG:3857",
+                       xmin = -pi * 6378137 + t4[["x"]] * m4, xmax = -pi * 6378137 + (t4[["x"]] + 1) * m4,
+                       ymin = pi * 6378137 - (t4[["y"]] + 1) * m4, ymax = pi * 6378137 - t4[["y"]] * m4)
+    warped <- function(f) terra::values(terra::project(terra::rast(f), tpl, method = "average", by_util = TRUE))
+    expect_gt(max(abs(warped(pyramid) - warped(plain)), na.rm = TRUE), 1)
+  }
+  # the checks: a raster with no coordinate reference system, a path GDAL cannot read, a table too large to read
+  bare <- r
+  terra::crs(bare) <- ""
+  expect_error(rr_tiles_dem(bare), "no coordinate reference system")
+  expect_error(rr_tiles_dem(withr::local_tempfile(fileext = ".tif")), "no raster GDAL reads")
+  expect_error(rr_tiles_dem(list(1)), "a raster file's path, a terra SpatRaster, or a data frame")
+  con <- .rr_connection()
+  big <- dplyr::tbl(con, dplyr::sql("SELECT range AS lon, range AS lat, 0 AS elevation FROM range(10000001)"))
+  expect_error(rr_tiles_dem(big), "10,000,001 cells, too many to read into R")
 })
 
 test_that("a dem layer's relief controls: MapLibre's defaults filled in, each value checked, its address names taken", {

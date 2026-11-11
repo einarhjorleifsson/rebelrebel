@@ -313,6 +313,7 @@ if (TP) for (const id of ["rb-time-line", "rb-time-pts", "rb-time-hover"]) SOURC
 const BUNDLE = JSON.parse(document.getElementById("bundle")?.textContent || "null");
 const bundleWait = {};
 window.RB_BUNDLE = (key, v) => { if (bundleWait[key]) bundleWait[key].v = v; };
+const bundleRows = {};   // a layer's rows in a bundle, once read on its first click
 function bundleLoad(key) {
   bundleWait[key] ??= { p: new Promise((resolve, reject) => {
     const s = document.createElement("script");
@@ -330,7 +331,11 @@ function bundleLoad(key) {
 }
 const fromBase64 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
 const bundleTiles = l => `tiles/${BUNDLE.tiles?.[l.id] ?? l.id}`;
-if (BUNDLE) maplibregl.addProtocol("bundle", async p => ({ data: fromBase64(await bundleLoad(p.url.slice("bundle://".length))) }));
+// a tile the bundle has no file for holds no feature: an empty tile, not an error, which would keep the coarser parent
+// tile drawn in its place, its features over its neighbours' (each drawn twice)
+if (BUNDLE) maplibregl.addProtocol("bundle", async p => ({
+  data: await bundleLoad(p.url.slice("bundle://".length)).then(fromBase64, () => new ArrayBuffer(0))
+}));
 // The notes (rr_serve(notes = )): only from a server that keeps them, never in a bundle. A thread's pin is red while
 // its last word is the reader's, blue once answered
 const NOTES = !BUNDLE && CONFIG.notes ? CONFIG.notes : null;
@@ -565,23 +570,41 @@ function applyShade(l) {
   $(l.id + "-exval").textContent = v.ex.toLocaleString(loc(), { minimumFractionDigits: 2 });
   $(l.id + "-opval").textContent = v.op + " %";
 }
-// A view's fit: the server's (the layer's `fit`), or in a bundle the browser's from the layer's own tiles in view
-// (bundleFit); it rejects where the view has no values
+// A view's fit: the page's from the layer's own tiles in view (tileFit), in a bundle and where the layer's is "page"
+// (rr_tiles_dem()'s tiles, or `fit = TRUE`); else the server's (the layer's `fit`, a function); it rejects where the
+// view has no values
 async function viewFit(l) {
   const b = map.getBounds();
-  if (BUNDLE) return bundleFit(l, b);
+  if (BUNDLE || l.fit === "page") return tileFit(l, b);
   const box = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(v => v.toFixed(4)).join(",");
   const r = await fetch(`/fit/${l.id}?bbox=${box}`);
   if (!r.ok) throw new Error(r.status);
   return r.json();
 }
-// A bundle's elevation tile in metres (Terrarium or Mapbox), the last 64 kept
+// A level elevation tile at nodata (the bundle's `fit`'s, 0 by default), in the layer's encoding and size, a PNG (a
+// lossless image, whatever the layer's format), made once a layer: a bundle's answer where it holds no tile, as
+// rr_tiles_dem() answers beyond its grid
+const levelTiles = {};
+function levelTile(l) {
+  return levelTiles[l.id] ??= (async () => {
+    const S = l.tile_size ?? 512, h = BUNDLE?.fit?.nodata ?? 0, c = new OffscreenCanvas(S, S), g = c.getContext("2d");
+    const v = l.encoding === "mapbox" ? Math.round((h + 10000) * 10) : h + 32768;
+    const rgb = l.encoding === "mapbox" ? [v >> 16 & 255, v >> 8 & 255, v & 255]
+                                        : [Math.floor(v / 256), Math.floor(v) % 256, Math.floor((v - Math.floor(v)) * 256)];
+    g.fillStyle = `rgb(${rgb.join(",")})`;
+    g.fillRect(0, 0, S, S);
+    return { data: await c.convertToBlob({ type: "image/png" }) };
+  })();
+}
+// An elevation tile in metres (Terrarium or Mapbox), from the bundle or the server, the last 64 kept
 const demCache = new Map();
 function demTile(l, z, x, y) {
-  const key = `${bundleTiles(l)}/${z}/${x}/${y}`;
+  const key = BUNDLE ? `${bundleTiles(l)}/${z}/${x}/${y}` : l.tileUrl.replace("{z}", z).replace("{x}", x).replace("{y}", y);
   if (!demCache.has(key)) {
-    demCache.set(key, bundleLoad(key).then(async s => {
-      const img = await createImageBitmap(new Blob([fromBase64(s)]), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    const bytes = BUNDLE ? bundleLoad(key).then(fromBase64)
+                         : fetch(key).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status)));
+    demCache.set(key, bytes.then(async buf => {
+      const img = await createImageBitmap(new Blob([buf]), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
       const c = new OffscreenCanvas(img.width, img.height).getContext("2d", { willReadFrequently: true });
       c.drawImage(img, 0, 0);
       const d = c.getImageData(0, 0, img.width, img.height).data, e = new Float32Array(img.width * img.height);
@@ -594,13 +617,14 @@ function demTile(l, z, x, y) {
   }
   return demCache.get(key);
 }
-// A bundle's fit, by its rules (rr_bundle()'s `fit`), from the layer's tiles at the map's zoom (to their deepest)
+// A fit made in the page, by its rules (rr_bundle()'s `fit`, or a served map's defaults), from the layer's tiles at the
+// map's zoom (to their deepest)
 // under the view, every so many pixels for a million at most: the values are the elevations, or the depths below sea
 // level for a colour `of` depth or contours with a negative multiplier, an elevation of `nodata` left out. Floor and
 // cap at the rules' percentiles to two figures, with their quantiles between; a shading's intensity `k` over the
 // slope's `p` percentile in degrees (from each pixel to its east and north neighbours), kept between `min` and `max`
-async function bundleFit(l, b) {
-  const F = BUNDLE.fit ?? {}, S = F.slope ?? {};
+async function tileFit(l, b) {
+  const F = (BUNDLE ? BUNDLE.fit : CONFIG.fit) ?? {}, S = F.slope ?? {};
   const z = Math.max(l.minzoom ?? 0, Math.min(l.maxzoom ?? 14, Math.floor(map.getZoom()))), n = 2 ** z;
   const X = lon => (lon + 180) / 360 * n;
   const Y = lat => { const r = Math.max(-85.05, Math.min(85.05, lat)) * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n; };
@@ -651,7 +675,7 @@ async function bundleFit(l, b) {
   if (!Object.keys(out).length) throw new Error("no values in view");
   return out;
 }
-// the intensity following the view: the server's for the view's relief (the layer's `fit`), each time the map settles
+// the intensity following the view: the view's relief by the layer's fit (viewFit), each time the map settles
 const shadeTimers = {};
 const shadeFollowing = l => !!l.shade?.fit && !!$(`${l.id}-auto`)?.checked;
 async function followShade(l) {
@@ -1369,26 +1393,31 @@ function addLayer(l, meta) {
                           minzoom: l.minzoom ?? 0, maxzoom: l.maxzoom ?? 14 });
     draw();
   } else if (l.kind === "dem") {
+    l.tileUrl = layerTiles(l, l.format ?? "png", meta.layers?.[l.id]?.v ?? meta.engine);  // its fit reads them too
     map.addSource(l.id, { type: "raster-dem", encoding: l.encoding ?? "terrarium", tileSize: l.tile_size ?? 512,
-                          tiles: [layerTiles(l, l.format ?? "png", meta.layers?.[l.id]?.v ?? meta.engine)],
+                          tiles: [l.tileUrl],
                           minzoom: l.minzoom ?? 0, maxzoom: l.maxzoom ?? 14, ...(l.bounds ? { bounds: l.bounds } : {}) });
     draw();
   } else if (l.kind === "contour") {
     // the lines are made in the browser from the elevation tiles, at the layer's intervals by zoom
+    l.tileUrl = layerTiles(l, l.format ?? "png", meta.layers?.[l.id]?.v ?? meta.engine);  // its fit reads them too
     loadContour().then(mlcontour => {
       // in a bundle on the page's own thread, its tiles read from the bundle where it would fetch them
       const dem = new mlcontour.DemSource({
         url: layerTiles(l, l.format ?? "png", meta.layers?.[l.id]?.v ?? meta.engine),
         encoding: l.encoding ?? "terrarium", maxzoom: l.maxzoom ?? 12, worker: !BUNDLE
       });
-      // a tile outside the layer's bounds (maplibre-contour asks for its neighbours) is refused here, not tried as a file
+      // a tile outside the layer's bounds (maplibre-contour asks for its neighbours) is not tried as a file; it, and one
+      // the bundle does not hold, is level at nodata, as a server answers: maplibre-contour draws no lines in a tile one
+      // of whose eight neighbours is refused, so a grid's edge tiles had none
       const inBounds = url => {
         const [z, x, y] = url.split("/").slice(-3).map(Number), n = 2 ** z, b = l.bounds;
         const lat = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
         return !b || (x / n * 360 - 180 < b[2] && (x + 1) / n * 360 - 180 > b[0] && lat(y + 1) < b[3] && lat(y) > b[1]);
       };
-      if (BUNDLE) dem.manager.getTile = url => inBounds(url) ? bundleLoad(url.slice("bundle://".length))
-        .then(b => ({ data: new Blob([fromBase64(b)], { type: `image/${l.format ?? "png"}` }) })) : Promise.reject(new Error("outside the layer's bounds"));
+      if (BUNDLE) dem.manager.getTile = url => (inBounds(url) ? bundleLoad(url.slice("bundle://".length))
+        .then(b => ({ data: new Blob([fromBase64(b)], { type: `image/${l.format ?? "png"}` }) })) : Promise.reject())
+        .catch(() => levelTile(l));
       dem.setupMaplibre(maplibregl);
       contourDem[l.id] = dem;
       map.addSource(l.id, { type: "vector", maxzoom: 15, ...(l.bounds ? { bounds: l.bounds } : {}),
@@ -1397,6 +1426,12 @@ function addLayer(l, meta) {
       draw();
       if (contourFollowing(l)) followContours(l);
     }).catch(() => missing(l));
+  } else if (l.kind === "geojson" && !BUNDLE && Number.isFinite(l.features) && !l.count?.where) {
+    // served, with its count known: MapLibre's worker fetches and reads the file, and the page keeps no copy of it
+    map.addSource(l.id, { type: "geojson", data: `${location.origin}/data/${l.id}.geojson` });
+    map.on("error", e => { if (e.sourceId === l.id && !map.isSourceLoaded(l.id)) missing(l); });
+    counts[l.id] = l.features;
+    draw();
   } else if (l.kind === "geojson") {
     (BUNDLE ? bundleLoad(`data/${l.id}`) : fetch(`/data/${l.id}.geojson`).then(r => r.ok ? r.json() : Promise.reject(r.status))).then(data => {
       map.addSource(l.id, { type: "geojson", data });
@@ -1663,7 +1698,8 @@ function featurePopup(l, e) {
     box.className = "rr-row-popup";
     box.innerHTML = `${featureHtml(l, p, false)}<div class="rr-row-body">${esc(tr("rowLoading"))}</div>`;
     const body = box.querySelector(".rr-row-body");
-    (BUNDLE ? bundleLoad(`data/${l.id}_rows`).then(d => {
+    // a bundle's rows file read on the layer's first click and kept, not read again at every click
+    (BUNDLE ? (bundleRows[l.id] ??= bundleLoad(`data/${l.id}_rows`)).then(d => {
       const v = d.rows[String(p.rr_row)];
       return v ? { columns: d.cols.map((c, i) => ({ ...c, value: v[i] ?? null, code: c.codes?.[String(v[i])] })) } : null;
     }) : fetch(`/row/${l.id}/${p.rr_row}`).then(r => r.ok ? r.json() : null))

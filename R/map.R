@@ -117,10 +117,10 @@
 #'   `shadow` and `highlight` (colours as `"#rrggbb"`); MapLibre's own defaults for those not given, but an intensity of
 #'   0.6 and a dark blue-grey shadow, `"#1b2a3a"`, as a bathymetry map in use settled on. `TRUE` takes
 #'   every default. Each control applies as it moves, and goes into the page's address as `<id>_method`, `<id>_dir`,
-#'   `<id>_alt`, `<id>_ex`, `<id>_op`, `<id>_shadow` and `<id>_light`. With `fit`, a function of the view's box as a
-#'   colour's `fit` returning a list with `exaggeration` (0-1), the intensity can follow the view (`auto`, `TRUE` by
-#'   default; `<id>_auto` in the address, which leaves out `<id>_ex` while it follows), until it is set by hand. Tiles
-#'   from [rr_tiles_dem()] carry a fit, taken when none is given.
+#'   `<id>_alt`, `<id>_ex`, `<id>_op`, `<id>_shadow` and `<id>_light`. With `fit`, `TRUE` or a function of the view's
+#'   box as a colour's `fit` returning a list with `exaggeration` (0-1), the intensity can follow the view (`auto`,
+#'   `TRUE` by default; `<id>_auto` in the address, which leaves out `<id>_ex` while it follows), until it is set by
+#'   hand. Tiles from [rr_tiles_dem()] are fitted in the page when no fit is given.
 #' @param colour For a dem layer with a `color-relief` style: its values in colour, with their controls in the page, a
 #'   list of any of `of` (`"depth"`, the elevation's negative, or `"elevation"`; what is 0 or less is clear),
 #'   `palettes` (the ids of the palettes its control offers, of the map's palettes) and `palette` (the one it opens
@@ -135,22 +135,24 @@
 #'   not among `palettes` is put first in them), and one of your own by adding it to the map's,
 #'   `rr_map(palettes = c(rr_palettes(), list(list(id = "mine", label = "mine", colors = <colours>))))`. Each control
 #'   applies as it moves, and goes into the page's address as `<id>_pal`, `<id>_lo`, `<id>_hi`, `<id>_scale`,
-#'   `<id>_mode`, `<id>_cut`, `<id>_cutas` and `<id>_cop`. With `fit`, a function of the view's `west`, `south`, `east`
-#'   and `north` returning the floor and the cap for the values there (or `NULL` where there are none; or a list of
-#'   `floor`, `cap` and `quantiles`, the values' quantiles rising, which also offers `scale` `"equal"`, each colour an
-#'   equal share of the values in view between the floor and the cap), the page has a
-#'   "Fit to view" button, answered by the server at `/fit/<id>?bbox=w,s,e,n`, and follows the view: it fits again each
-#'   time the map settles, until a floor or cap is set by hand (`auto`, `TRUE` by default; `<id>_auto` in the address,
-#'   where the floor and cap are left out while it follows). Tiles from [rr_tiles_dem()] carry a fit, taken when
-#'   none is given.
+#'   `<id>_mode`, `<id>_cut`, `<id>_cutas` and `<id>_cop`. With `fit`, the page has a "Fit to view" button and follows
+#'   the view: it fits again each time the map settles, until a floor or cap is set by hand (`auto`, `TRUE` by default;
+#'   `<id>_auto` in the address, where the floor and cap are left out while it follows). `fit = TRUE` makes the fit in
+#'   the page from the layer's tiles in view, with no call to R (by the rules of [rr_bundle()]'s `fit`): the floor
+#'   and the cap and the values' quantiles, which also offer `scale` `"equal"`, each colour an equal share of the values
+#'   in view between the floor and the cap. Or `fit` is a function of the view's `west`, `south`, `east` and `north`,
+#'   answered by the server at `/fit/<id>?bbox=w,s,e,n`, returning the floor and the cap for the values there (or
+#'   `NULL` where there are none; or a list of `floor`, `cap` and `quantiles`, the values' quantiles rising); a bundle
+#'   fits in the page all the same. Tiles from [rr_tiles_dem()] are fitted in the page when no fit is given.
 #' @param contours For a contour layer: `thresholds`, a named list by zoom of the minor and the major interval from that
 #'   zoom on (`list("6" = c(500, 1000), "9" = c(50, 200))`; a major line has `level` 1), and `multiplier`, by which the
-#'   elevations are multiplied before the lines are drawn (-1 for depths, 1 by default). With `fit`, a function as a
-#'   colour's `fit` returning a list with the `quantiles` of the values in view, the lines can follow the view (`auto`,
+#'   elevations are multiplied before the lines are drawn (-1 for depths, 1 by default). With `fit`, `TRUE` or a
+#'   function as a colour's `fit` returning a list with the `quantiles` of the values in view, the lines can follow the
+#'   view (`auto`,
 #'   `TRUE` by default; `<id>_auto` in the address): about a dozen levels at round values near the view's quantiles,
 #'   so the lines fall where the area is, drawn at a step of 1, 2 or 5 times a power of ten that makes some 40 of the
-#'   view's range; unticked, the `thresholds` and the style's filters. Tiles from [rr_tiles_dem()] carry a fit,
-#'   taken when none is given (by depth with a negative `multiplier`, else by elevation).
+#'   view's range; unticked, the `thresholds` and the style's filters. Tiles from [rr_tiles_dem()] are fitted in the
+#'   page when no fit is given (by depth with a negative `multiplier`, else by elevation).
 #' @param state For a vector, geojson, dem or contour layer: values in the reader's hands that its `style` reads, in
 #'   a filter, a paint or a layout property, as `list("global-state", "<id>_<name>")` (MapLibre's global state), such
 #'   as whether a style is drawn, its colour, or a shift of the zoom it starts at. A list of controls, each with `id`
@@ -358,19 +360,38 @@ rr_layer <- function(
   } else if (!is.null(encoding) || !is.null(tile_size) || !is.null(bounds)) {
     stop("`encoding`, `tile_size` and `bounds` are for a dem or contour layer.", call. = FALSE)
   }
-  fit <- NULL # a colour's, the shading's or the contours' fit: kept on the server, the page told only that there is one
-  # the tiles' own fit (rr_tiles_dem()), taken where the layer gives none, by a depth's values or an elevation's
-  tiles_fit <- if (kind %in% c("dem", "contour") && is.function(attr(tiles, "fit"))) attr(tiles, "fit")
+  # a colour's, the shading's or the contours' fit: "page", made in the page from the tiles in view, or a function kept
+  # on the server, the page told only that there is one
+  fit <- NULL
+  # the tiles' own fit (rr_tiles_dem()'s "page", or a function), taken where the layer gives none, by a depth's values or
+  # an elevation's
+  tiles_fit <- if (kind %in% c("dem", "contour")) {
+    af <- attr(tiles, "fit")
+    if (is.function(af) || identical(af, "page")) af
+  }
   from_tiles <- function(of) {
+    if (identical(tiles_fit, "page")) {
+      return("page")
+    }
     force(of)
     function(west, south, east, north) tiles_fit(west, south, east, north, of = of)
   }
+  # a fit given: TRUE, the page's from the tiles in view; or a function of the view's box, the server's
+  given_fit <- function(f, what) {
+    if (isTRUE(f)) {
+      return("page")
+    }
+    if (!is.function(f)) {
+      stop(
+        sprintf("`%s$fit` is TRUE (made in the page from the tiles in view) or a function of west, south, east and north.", what),
+        call. = FALSE
+      )
+    }
+    f
+  }
   if (kind == "contour") {
     if (is.list(contours) && !is.null(contours$fit)) {
-      if (!is.function(contours$fit)) {
-        stop("`contours$fit` is a function of west, south, east and north.", call. = FALSE)
-      }
-      fit <- contours$fit
+      fit <- given_fit(contours$fit, "contours")
       contours$fit <- NULL
     }
     contours <- .rr_map_contours(contours)
@@ -384,20 +405,14 @@ rr_layer <- function(
     stop("`contours` is for a contour layer.", call. = FALSE)
   }
   if (is.list(shade) && !is.null(shade$fit)) {
-    if (!is.function(shade$fit)) {
-      stop("`shade$fit` is a function of west, south, east and north.", call. = FALSE)
-    }
-    fit <- shade$fit
+    fit <- given_fit(shade$fit, "shade")
     shade$fit <- NULL
   }
   if (is.list(colour) && !is.null(colour$fit)) {
-    if (!is.function(colour$fit)) {
-      stop("`colour$fit` is a function of west, south, east and north.", call. = FALSE)
-    }
     if (!is.null(fit)) {
       stop("A layer has one fit: give the colour's and the shading's to two layers on the same tiles.", call. = FALSE)
     }
-    fit <- colour$fit
+    fit <- given_fit(colour$fit, "colour")
     colour$fit <- NULL
   }
   if (is.null(fit) && !is.null(tiles_fit) && kind == "dem" && (!is.null(shade) || !is.null(colour))) {
@@ -445,7 +460,8 @@ rr_layer <- function(
     shade = shade,
     colour = colour,
     contours = contours,
-    state = state
+    state = state,
+    fit = if (identical(fit, "page")) "page"
   )
   structure(
     list(
@@ -848,7 +864,9 @@ rr_map <- function(
       }
       p
     }),
-    texts = texts
+    texts = texts,
+    # the rules of a fit made in the page (rr_bundle()'s defaults), where a layer's is
+    fit = if (any(vapply(layers, function(l) identical(l$config$fit, "page"), NA))) .rr_map_bundle_fit(list())
   )
   structure(
     list(config = Filter(Negate(is.null), config), layers = layers),

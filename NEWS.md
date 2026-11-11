@@ -1,3 +1,30 @@
+# rebelrebel 2026.11.11
+
+* `rr_tiles_dem()` reads a grid where it is, through terra (now in Suggests) and GDAL: a GeoTIFF, a Cloud Optimized
+  GeoTIFF or any raster GDAL reads, in any projection; a terra `SpatRaster`; or, as before, a data frame of a grid's
+  cells (a lazy table of at most 10 million rows is read into R). Each tile is warped from the grid once: averaged where
+  a pixel is wider than a cell, bilinear where it is narrower; a GeoTIFF's overviews read only where a pixel spans eight
+  cells or more (the file opened again with GDAL's `OVERVIEW_LEVEL=NONE` for the rest, as terra hands the warp
+  utility's own `-ovr` no further). The DuckDB table of cells is gone. Measured on a 50 m grid of 523 million cells (287
+  million of them sea), each run a fresh R process: the first tile in under 2 s and 0.3-0.5 GB, where the table of
+  cells took 23 s and 7 GB; every tile to zoom 8 in 80-86 s and 3 GB (1.7 GB from a Cloud Optimized GeoTIFF), against
+  96 s and 8 GB; and the tiles three times closer to the grid at zoom 8 (0.07 m on average against 0.24 m), as the
+  cells were a resampled copy.
+* Elevation tiles stop at zoom 8 by default (pixels of about 130 m at 65 degrees north), or at the grid's own limit if
+  it is coarser; `maxzoom` goes deeper.
+* A fit made in the page: a dem or contour layer on `rr_tiles_dem()`'s tiles fits its colours, contours and shading to
+  the view from the tiles in view, served or in a bundle, with no call to R (by `rr_bundle()`'s default rules, which a
+  served map's config now carries). `fit = TRUE` asks the same of any elevation tiles; a function stays the server's.
+* `whole` on `rr_point()`, `rr_line()`, `rr_segment()`, `rr_polygon()`, `rr_text()` and `rr_path()`: `TRUE` sends a
+  layer's rows to the page as one GeoJSON file, read once by MapLibre's worker; by default, as before, as tiles.
+* A tile holds the features within its margin (64 of its 4,096 units past each edge): a point just past a tile's edge
+  was in neither tile's drawing, and vanished.
+* A bundle opened from its folder: a tile it does not hold is empty, not an error (points were drawn twice where a
+  tile was missing), and a layer's rows are read once, not at each click.
+* A bundle's contours reach the grid's edge: an elevation tile it does not hold, beyond the grid or not written, is
+  level at nodata, as a served map's is. maplibre-contour draws no lines in a tile with a neighbour refused, and on a
+  small grid most of a view went without (6 line pieces where the served map drew 74).
+
 # rebelrebel 2026.11.10.8
 
 * An id is a list, not a range: in `choose`, a whole number (stored as an integer) is a list, as text is, and a

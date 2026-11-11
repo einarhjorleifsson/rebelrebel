@@ -234,12 +234,13 @@
     s$state$panel_fields[[id]] <- Filter(Negate(is.null), list(by = ctx$by, t = "rr_t"))
   }
   tbl <- dplyr::tbl(con, dplyr::sql(sprintf("SELECT * FROM %s", rows_nm)))
-  tiles <- if (mark == "segment") {
-    rr_tiles_table(tbl, geometry = "rr_geometry", properties = props)
+  whole <- isTRUE(a$whole)
+  sent <- if (mark == "segment") {
+    .rr_send(tbl, geometry = "rr_geometry", properties = props, whole = whole, order = "rr_row")
   } else if (!is.null(ctx$geometry)) {
-    rr_tiles_table(tbl, geometry = ctx$geometry, properties = props, thin = thin)
+    .rr_send(tbl, geometry = ctx$geometry, properties = props, thin = thin, whole = whole, order = "rr_row")
   } else {
-    rr_tiles_table(tbl, lon = ctx$lon, lat = ctx$lat, properties = props, thin = thin)
+    .rr_send(tbl, lon = ctx$lon, lat = ctx$lat, properties = props, thin = thin, whole = whole, order = "rr_row")
   }
   # a point's size: one that stays, or between two bounds from the zoom at which the points stop lying on one another
   radius <- if (mark == "point") {
@@ -287,14 +288,16 @@
     .rr_swatches(list(list(swatch = list(dot = fixed), label = nm$label)), mark, outline)
   what <- switch(mark, point = "point", line = "line", segment = "line from its start to its end",
                  polygon = "area", text = "label")
+  style <- .rr_styles_for(style, sent$kind)
   layer <- rr_layer(
-    id, "vector",
+    id, sent$kind,
     label = nm$label,
     info = .rr_or(a$info, if (length(cols) == 1) sprintf("Each row a %s, coloured by %s.", what, cols) else
       if (length(cols) > 1) sprintf("Each row a %s, coloured by the column chosen below.", what) else
       sprintf("Each row a %s.", what)),
     visible = a$visible,
-    tiles = tiles,
+    tiles = sent$tiles,
+    data = sent$data,
     count = list(text = paste("{1}", mk$count)),
     minzoom = a$minzoom,
     maxzoom = a$maxzoom,
@@ -307,12 +310,36 @@
     }
   )
   layer$config$choose <- own$config
+  layer$config$features <- attr(sent$data, "count") # sent whole, its count, so the page need not read the file
   meta <- .rr_popup_meta(pop, ctx$dict, a$labels, a$codes) # checked now, not on the first click
   if (length(pop)) {
     layer$row <- .rr_row_reader(con, rows_nm, pop, meta)
   }
   s$state$layer_section[[id]] <- a$section
-  .rr_hold(.rr_quick_map(s, layer, list(con = con, name = attr(tiles, "table"))))
+  .rr_hold(.rr_quick_map(s, layer, sent$table))
+}
+
+# How a layer's rows reach the page: as tiles cut by DuckDB when the page asks (rr_tiles_table()), or whole, as one
+# GeoJSON file the page reads once (`whole`). The layer's kind, its tiles or data, and the table a served map drops
+.rr_send <- function(x, geometry = "geometry", lon = NULL, lat = NULL, properties = NULL, thin = NULL, whole = FALSE,
+                     order = NULL) {
+  if (isTRUE(whole)) {
+    data <- .rr_geojson_table(x, geometry, lon, lat, properties, order)
+    return(list(kind = "geojson", tiles = NULL, data = data, table = NULL))
+  }
+  tiles <- rr_tiles_table(x, geometry = geometry, lon = lon, lat = lat, properties = properties, thin = thin)
+  list(kind = "vector", tiles = tiles, data = NULL, table = list(con = .rr_con_for(x), name = attr(tiles, "table")))
+}
+
+# A layer's styles for its kind: a GeoJSON source has no source layer
+.rr_styles_for <- function(style, kind) {
+  if (kind != "geojson") {
+    return(style)
+  }
+  lapply(style, function(st) {
+    st[["source-layer"]] <- NULL
+    st
+  })
 }
 
 # A point's size from `size`: one number, a diameter that stays; two, the least and the most of one that follows the
@@ -450,6 +477,11 @@
 #'   stays.
 #' @param linewidth A line's width (an area's outline), in pixels.
 #' @param opacity The marks' opacity, 0-1.
+#' @param whole How the rows reach the page: `TRUE`, whole, as one GeoJSON file read once (no further fetching as the
+#'   reader zooms and pans, nothing cut at a tile's edge, one file in a bundle); `FALSE`, as vector tiles cut by
+#'   DuckDB as the page asks for them, which keep a page light however many rows there are. By default (`NULL`) as
+#'   tiles. Measured on layers of real data, the two are equal in a browser up to about 5 MB of GeoJSON (some 30,000
+#'   points); above it a whole layer is slower and heavier.
 #' @param thin For points: in each tile, one point for each screen pixel, `TRUE` (each colour, each value a `choose`
 #'   list picks and each group of a time panel keeping its own), so a tile of millions of rows reaches the page as
 #'   what can be seen of them; a number of pixels for coarser cells; `FALSE` keeps every point. At the layer's
@@ -496,14 +528,14 @@
 #' }
 rr_point <- function(
   map, data = NULL, lon = NULL, lat = NULL,
-  colour = NULL, size = NULL, opacity = NULL, thin = TRUE,
+  colour = NULL, size = NULL, opacity = NULL, whole = NULL, thin = TRUE,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
   popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
-    lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity, thin = thin,
+    lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity, whole = whole, thin = thin,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
     labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
@@ -516,14 +548,14 @@ rr_point <- function(
 #' @export
 rr_line <- function(
   map, data = NULL,
-  colour = NULL, linewidth = NULL, opacity = NULL,
+  colour = NULL, linewidth = NULL, opacity = NULL, whole = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
   popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
-    colour = rlang::enquo(colour), linewidth = rlang::enquo(linewidth), opacity = opacity,
+    colour = rlang::enquo(colour), linewidth = rlang::enquo(linewidth), opacity = opacity, whole = whole,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
     labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
@@ -536,7 +568,7 @@ rr_line <- function(
 #' @export
 rr_segment <- function(
   map, data = NULL, lon = NULL, lat = NULL, lon_end, lat_end,
-  colour = NULL, linewidth = NULL, opacity = NULL,
+  colour = NULL, linewidth = NULL, opacity = NULL, whole = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
   popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
@@ -545,7 +577,7 @@ rr_segment <- function(
   a <- .rr_mark_args(list(
     lon = lon, lat = lat, lon_end = .rr_one_col(rlang::enquo(lon_end), "lon_end"),
     lat_end = .rr_one_col(rlang::enquo(lat_end), "lat_end"),
-    colour = rlang::enquo(colour), linewidth = rlang::enquo(linewidth), opacity = opacity,
+    colour = rlang::enquo(colour), linewidth = rlang::enquo(linewidth), opacity = opacity, whole = whole,
     palette = palette, limits = limits, stretch = stretch, legend = legend, popup = rlang::enquo(popup),
     labels = labels, codes = codes, hover = rlang::enquo(hover), choose = rlang::enquo(choose), name = name, info = info, section = section,
     visible = visible, minzoom = minzoom, maxzoom = maxzoom
@@ -558,7 +590,7 @@ rr_segment <- function(
 #' @export
 rr_polygon <- function(
   map, data = NULL,
-  colour = NULL, fill = NULL, linewidth = NULL, opacity = NULL,
+  colour = NULL, fill = NULL, linewidth = NULL, opacity = NULL, whole = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
   popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
@@ -566,7 +598,7 @@ rr_polygon <- function(
 ) {
   a <- .rr_mark_args(list(
     colour = rlang::enquo(colour), fill = rlang::enquo(fill), linewidth = rlang::enquo(linewidth),
-    opacity = opacity, palette = palette, limits = limits, stretch = stretch, legend = legend,
+    opacity = opacity, whole = whole, palette = palette, limits = limits, stretch = stretch, legend = legend,
     popup = rlang::enquo(popup), labels = labels, codes = codes, hover = rlang::enquo(hover),
     choose = rlang::enquo(choose), name = name,
     info = info, section = section, visible = visible, minzoom = minzoom, maxzoom = maxzoom
@@ -579,14 +611,14 @@ rr_polygon <- function(
 #' @export
 rr_text <- function(
   map, data = NULL, lon = NULL, lat = NULL,
-  colour = NULL, size = NULL, opacity = NULL, label,
+  colour = NULL, size = NULL, opacity = NULL, whole = NULL, label,
   palette = NULL, limits = NULL, stretch = NULL, legend = FALSE,
   popup = FALSE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
   minzoom = NULL, maxzoom = NULL, ...
 ) {
   a <- .rr_mark_args(list(
-    lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity,
+    lon = lon, lat = lat, colour = rlang::enquo(colour), size = rlang::enquo(size), opacity = opacity, whole = whole,
     label = rlang::enquo(label), palette = palette, limits = limits, stretch = stretch, legend = legend,
     popup = rlang::enquo(popup), labels = labels, codes = codes, hover = rlang::enquo(hover),
     choose = rlang::enquo(choose), name = name,
@@ -632,7 +664,7 @@ rr_text <- function(
 #' }
 rr_path <- function(
   map, data = NULL, lon = NULL, lat = NULL, group = NULL, time, max_gap_s = Inf,
-  colour = NULL, linewidth = NULL, opacity = NULL,
+  colour = NULL, linewidth = NULL, opacity = NULL, whole = NULL,
   palette = NULL, limits = NULL, stretch = NULL, legend = TRUE,
   popup = TRUE, labels = NULL, codes = NULL, hover = NULL, choose = NULL,
   name = NULL, info = NULL, section = "Layers", visible = TRUE,
@@ -727,7 +759,7 @@ rr_path <- function(
   if (!is.null(t_s)) {
     s$state$panel_fields[[id]] <- list(by = .rr_or(grp[1], NULL), t0 = "rr_t0", t1 = "rr_t1")
   }
-  tiles <- rr_tiles_table(dplyr::tbl(con, dplyr::sql(lines_src)), properties = props)
+  sent <- .rr_send(dplyr::tbl(con, dplyr::sql(lines_src)), properties = props, whole = isTRUE(whole))
   sid <- paste0(id, "-line")
   title <- if (length(hov)) hov else if (length(intersect(pop, keys))) intersect(pop, keys)[1] else if (length(pop)) "start"
   pm <- .rr_popup_meta(unique(c(keys, cc)), ctx$dict, labels, codes)
@@ -753,7 +785,7 @@ rr_path <- function(
     )
   }
   layer <- rr_layer(
-    id, "vector",
+    id, sent$kind,
     label = nm$label,
     info = .rr_or(info, paste0(
       if (length(grp)) sprintf("The rows of each %s", paste(grp, collapse = " and ")) else "The rows",
@@ -763,17 +795,18 @@ rr_path <- function(
       "."
     )),
     visible = visible,
-    tiles = tiles,
+    tiles = sent$tiles,
+    data = sent$data,
     count = list(text = "{1} lines"),
     minzoom = minzoom,
     maxzoom = maxzoom,
-    style = list(list(
+    style = .rr_styles_for(list(list(
       id = sid, type = "line", "source-layer" = "features",
       layout = list("line-cap" = "round", "line-join" = "round"),
       paint = list("line-color" = if (length(cc)) colours$colour else fixed,
                    "line-width" = .rr_or(linewidth, list("interpolate", list("linear"), list("zoom"), 3, 1, 8, 2, 13, 3.5)),
                    "line-opacity" = .rr_or(opacity, 0.85))
-    )),
+    )), sent$kind),
     legend = if (!isTRUE(legend)) NULL else if (length(cc)) .rr_swatches(colours$legend, "line") else
       .rr_swatches(list(list(swatch = list(dot = fixed), label = nm$label)), "line"),
     popup = if (!is.null(title)) {
@@ -781,9 +814,10 @@ rr_path <- function(
     }
   )
   layer$config$choose <- own$config
+  layer$config$features <- attr(sent$data, "count") # sent whole, its count, so the page need not read the file
   s$state$max_gap_s <- .rr_or(s$state$max_gap_s, max_gap_s)
   s$state$layer_section[[id]] <- section
-  .rr_hold(.rr_quick_map(s, layer, list(con = con, name = attr(tiles, "table"))))
+  .rr_hold(.rr_quick_map(s, layer, sent$table))
 }
 
 # Rows joined into lines, the query a path is drawn from (rr_path(), and the quick look's track): a line per value of

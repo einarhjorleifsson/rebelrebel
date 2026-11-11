@@ -7,7 +7,7 @@ paint <- function(m, i = 1) layer(m, i)$style[[1]]$paint
 test_that("every layer function takes its arguments in the plan's one order", {
   order <- c(
     "map", "data", "lon", "lat", "lon_end", "lat_end", "group", "time", "max_gap_s", "elevation", "of", "cell", "fun",
-    "colour", "fill", "size", "linewidth", "opacity", "thin", "label",
+    "colour", "fill", "size", "linewidth", "opacity", "whole", "thin", "label",
     "palette", "limits", "breaks", "stretch", "legend",
     "popup", "labels", "codes", "hover", "choose",
     "name", "info", "section", "visible",
@@ -251,15 +251,57 @@ test_that("points thinned in a tile: one a pixel and class, and at the deepest z
   one <- rr_tiles_table(x, lon = "lon", lat = "lat", properties = "colour", thin = list(px = 1, until = 14))
   by <- rr_tiles_table(x, lon = "lon", lat = "lat", properties = "colour", thin = list(px = 1, by = "colour", until = 14))
   n <- function(f, z, x, y) unname(mvt_count(f(z, x, y))["features"])
-  # the busiest tile at zoom 6, as measured (fishycode plan 072 §3.15): 140,734 points, 3,510 a pixel and colour
-  expect_equal(n(whole, 6, 33, 19), 140734)
-  expect_equal(n(by, 6, 33, 19), 3510)
+  # the busiest tile at zoom 6: 140,734 points in it, 141,036 with its margin
+  # (each tile holds the features within 64 of its 4,096 units past its edge); 3,528 a pixel and colour
+  expect_equal(n(whole, 6, 33, 19), 141036)
+  expect_equal(n(by, 6, 33, 19), 3528)
   expect_lt(n(one, 6, 33, 19), n(by, 6, 33, 19)) # each colour keeps its own
   expect_identical(by(6, 33, 19), by(6, 33, 19)) # the same points every time
-  # at the deepest zoom, a harbour's 14,577 points on 855 spots of the tile's own grid
-  expect_equal(n(whole, 14, 8712, 4910), 14577)
-  expect_equal(n(by, 14, 8712, 4910), 855)
+  # at the deepest zoom, a harbour's 14,579 points (with the margin) on 857 spots of the tile's own grid
+  expect_equal(n(whole, 14, 8712, 4910), 14579)
+  expect_equal(n(by, 14, 8712, 4910), 857)
   expect_error(rr_tiles_table(x, lon = "lon", lat = "lat", thin = list(px = 1)), "`thin` is a list")
+})
+
+test_that("whole: a layer sent to the page as one GeoJSON file", {
+  skip_if_no_spatial()
+  m <- rr_point(rr_example("trawlsurvey"), colour = behaviour, popup = c(vid, speed), whole = TRUE)
+  l <- layer(m)
+  expect_equal(l$kind, "geojson")
+  expect_equal(l$features, 8918) # its count, so the page need not read the file
+  expect_null(l$style[[1]][["source-layer"]]) # a GeoJSON source has none
+  g <- jsonlite::fromJSON(m$layers[[1]]$data(), simplifyVector = FALSE)
+  expect_length(g$features, 8918)
+  # the properties the tiles would carry, and coordinates to six decimals
+  t <- rr_point(rr_example("trawlsurvey"), colour = behaviour, popup = c(vid, speed), whole = FALSE)
+  expect_setequal(names(g$features[[1]]$properties), c("rr_c1", "rr_row", "vid", "rr_t"))
+  expect_true(all(abs(unlist(g$features[[1]]$geometry$coordinates) * 1e6 - round(unlist(g$features[[1]]$geometry$coordinates) * 1e6)) < 1e-6))
+  expect_equal(layer(t)$kind, "vector")
+  # paths, lines and areas too
+  p <- rr_map(rr_example("trawlsurvey")) |> rr_path(group = vid, time = time, whole = TRUE)
+  expect_equal(layer(p)$kind, "geojson")
+  expect_equal(attr(p$layers[[1]]$data, "count"), layer(p)$features)
+  h <- rr_polygon(rr_example("dansk_harbours"), whole = TRUE)
+  expect_equal(layer(h)$features, 942)
+  # a bundle writes the file, and no tiles for the layer
+  dir <- tempfile()
+  suppressMessages(rr_bundle(m, dir))
+  expect_true(file.exists(file.path(dir, "data", paste0(l$id, ".js"))))
+  expect_false(dir.exists(file.path(dir, "tiles", l$id)))
+  unlink(dir, recursive = TRUE)
+})
+
+test_that("a tile holds the features in its margin: a point just past its edge is drawn by one tile", {
+  skip_if_no_spatial()
+  # 61 m north of a zoom-5 tile edge (66.51326 N): the tile above rounds it onto its bottom edge, where MapLibre does
+  # not draw a point, and the tile below has it in its margin, within its extent once rounded
+  d <- data.frame(lon = -21.56479, lat = 66.51381)
+  tl <- rr_tiles_table(d, lon = "lon", lat = "lat")
+  n <- function(z, x, y) sum(mvt_count(tl(z, x, y)))
+  expect_equal(n(5, 14, 7), 1)
+  expect_equal(n(5, 14, 8), 1)
+  expect_true(any(attr(tl, "tiles_at")(5)$y == 8)) # a bundle writes the tile below too
+  expect_equal(n(5, 14, 9), 0)
 })
 
 test_that("a point layer: thinned by default, its size following the zoom", {
@@ -279,10 +321,10 @@ test_that("a point layer: thinned by default, its size following the zoom", {
   expect_error(rr_point(d, thin = "yes"), "`thin` is TRUE")
   # the busiest tile at zoom 6 thinned, and whole with thin = FALSE
   n <- function(m) unname(mvt_count(m$layers[[1]]$tiles(6, 33, 19))["features"])
-  expect_equal(n(m), 3510)
-  expect_equal(n(rr_point(d, colour = behaviour, thin = FALSE)), 140734)
+  expect_equal(n(m), 3528)
+  expect_equal(n(rr_point(d, colour = behaviour, thin = FALSE)), 141036)
   # a choose list keeps its values apart: a vessel chosen loses none of its points to another's
-  expect_gt(n(rr_point(d, colour = behaviour, choose = vessel_id)), 3510)
+  expect_gt(n(rr_point(d, colour = behaviour, choose = vessel_id)), 3528)
 })
 
 test_that("lines, segments, areas and text: their style, legend and data", {

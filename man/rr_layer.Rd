@@ -116,10 +116,10 @@ intensity, 0-1), \code{opacity} (0-100: the alpha of the shading's colours, whic
 \code{shadow} and \code{highlight} (colours as \code{"#rrggbb"}); MapLibre's own defaults for those not given, but an intensity of
 0.6 and a dark blue-grey shadow, \code{"#1b2a3a"}, as a bathymetry map in use settled on. \code{TRUE} takes
 every default. Each control applies as it moves, and goes into the page's address as \verb{<id>_method}, \verb{<id>_dir},
-\verb{<id>_alt}, \verb{<id>_ex}, \verb{<id>_op}, \verb{<id>_shadow} and \verb{<id>_light}. With \code{fit}, a function of the view's box as a
-colour's \code{fit} returning a list with \code{exaggeration} (0-1), the intensity can follow the view (\code{auto}, \code{TRUE} by
-default; \verb{<id>_auto} in the address, which leaves out \verb{<id>_ex} while it follows), until it is set by hand. Tiles
-from \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} carry a fit, taken when none is given.}
+\verb{<id>_alt}, \verb{<id>_ex}, \verb{<id>_op}, \verb{<id>_shadow} and \verb{<id>_light}. With \code{fit}, \code{TRUE} or a function of the view's
+box as a colour's \code{fit} returning a list with \code{exaggeration} (0-1), the intensity can follow the view (\code{auto},
+\code{TRUE} by default; \verb{<id>_auto} in the address, which leaves out \verb{<id>_ex} while it follows), until it is set by
+hand. Tiles from \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} are fitted in the page when no fit is given.}
 
 \item{colour}{For a dem layer with a \code{color-relief} style: its values in colour, with their controls in the page, a
 list of any of \code{of} (\code{"depth"}, the elevation's negative, or \code{"elevation"}; what is 0 or less is clear),
@@ -135,23 +135,25 @@ palette, such as \code{"magma"}, is offered by naming it, \code{colour = list(pa
 not among \code{palettes} is put first in them), and one of your own by adding it to the map's,
 \verb{rr_map(palettes = c(rr_palettes(), list(list(id = "mine", label = "mine", colors = <colours>))))}. Each control
 applies as it moves, and goes into the page's address as \verb{<id>_pal}, \verb{<id>_lo}, \verb{<id>_hi}, \verb{<id>_scale},
-\verb{<id>_mode}, \verb{<id>_cut}, \verb{<id>_cutas} and \verb{<id>_cop}. With \code{fit}, a function of the view's \code{west}, \code{south}, \code{east}
-and \code{north} returning the floor and the cap for the values there (or \code{NULL} where there are none; or a list of
-\code{floor}, \code{cap} and \code{quantiles}, the values' quantiles rising, which also offers \code{scale} \code{"equal"}, each colour an
-equal share of the values in view between the floor and the cap), the page has a
-"Fit to view" button, answered by the server at \verb{/fit/<id>?bbox=w,s,e,n}, and follows the view: it fits again each
-time the map settles, until a floor or cap is set by hand (\code{auto}, \code{TRUE} by default; \verb{<id>_auto} in the address,
-where the floor and cap are left out while it follows). Tiles from \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} carry a fit, taken when
-none is given.}
+\verb{<id>_mode}, \verb{<id>_cut}, \verb{<id>_cutas} and \verb{<id>_cop}. With \code{fit}, the page has a "Fit to view" button and follows
+the view: it fits again each time the map settles, until a floor or cap is set by hand (\code{auto}, \code{TRUE} by default;
+\verb{<id>_auto} in the address, where the floor and cap are left out while it follows). \code{fit = TRUE} makes the fit in
+the page from the layer's tiles in view, with no call to R (by the rules of \code{\link[=rr_bundle]{rr_bundle()}}'s \code{fit}): the floor
+and the cap and the values' quantiles, which also offer \code{scale} \code{"equal"}, each colour an equal share of the values
+in view between the floor and the cap. Or \code{fit} is a function of the view's \code{west}, \code{south}, \code{east} and \code{north},
+answered by the server at \verb{/fit/<id>?bbox=w,s,e,n}, returning the floor and the cap for the values there (or
+\code{NULL} where there are none; or a list of \code{floor}, \code{cap} and \code{quantiles}, the values' quantiles rising); a bundle
+fits in the page all the same. Tiles from \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} are fitted in the page when no fit is given.}
 
 \item{contours}{For a contour layer: \code{thresholds}, a named list by zoom of the minor and the major interval from that
 zoom on (\code{list("6" = c(500, 1000), "9" = c(50, 200))}; a major line has \code{level} 1), and \code{multiplier}, by which the
-elevations are multiplied before the lines are drawn (-1 for depths, 1 by default). With \code{fit}, a function as a
-colour's \code{fit} returning a list with the \code{quantiles} of the values in view, the lines can follow the view (\code{auto},
+elevations are multiplied before the lines are drawn (-1 for depths, 1 by default). With \code{fit}, \code{TRUE} or a
+function as a colour's \code{fit} returning a list with the \code{quantiles} of the values in view, the lines can follow the
+view (\code{auto},
 \code{TRUE} by default; \verb{<id>_auto} in the address): about a dozen levels at round values near the view's quantiles,
 so the lines fall where the area is, drawn at a step of 1, 2 or 5 times a power of ten that makes some 40 of the
-view's range; unticked, the \code{thresholds} and the style's filters. Tiles from \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} carry a fit,
-taken when none is given (by depth with a negative \code{multiplier}, else by elevation).}
+view's range; unticked, the \code{thresholds} and the style's filters. Tiles from \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} are fitted in the
+page when no fit is given (by depth with a negative \code{multiplier}, else by elevation).}
 
 \item{state}{For a vector, geojson, dem or contour layer: values in the reader's hands that its \code{style} reads, in
 a filter, a paint or a layout property, as \code{list("global-state", "<id>_<name>")} (MapLibre's global state), such
