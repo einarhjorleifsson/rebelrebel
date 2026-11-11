@@ -167,9 +167,11 @@ stays.}
 
 \item{whole}{How the rows reach the page: \code{TRUE}, whole, as one GeoJSON file read once (no further fetching as the
 reader zooms and pans, nothing cut at a tile's edge, one file in a bundle); \code{FALSE}, as vector tiles cut by
-DuckDB as the page asks for them, which keep a page light however many rows there are. By default (\code{NULL}) as
-tiles. Measured on layers of real data, the two are equal in a browser up to about 5 MB of GeoJSON (some 30,000
-points); above it a whole layer is slower and heavier.}
+DuckDB as the page asks for them, which keep a page light however many rows there are. By default (\code{NULL}) whole
+when its GeoJSON is at most 5 MB (some 30,000 points; a table of more than 50,000 rows is not tried), else as
+tiles: measured on layers of real data, the two are equal in a browser up to about 5 MB, and a whole layer needs
+nothing more of R once read, so a served map pans and zooms while R is busy. Above it a whole layer is slower and
+heavier (about 50 MB of a browser's memory for each MB of GeoJSON).}
 
 \item{thin}{For points: in each tile, one point for each screen pixel, \code{TRUE} (each colour, each value a \code{choose}
 list picks and each group of a time panel keeping its own), so a tile of millions of rows reaches the page as

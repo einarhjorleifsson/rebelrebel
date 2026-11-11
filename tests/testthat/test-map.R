@@ -578,8 +578,9 @@ test_that("a map is served when printed at a console; a replaced map's tables ar
   }
   df <- dplyr::collect(utils::head(rr_example("dansk"), 500))
   port <- httpuv::randomPort()
-  m1 <- rr_path(df, group = vessel_id, time = time_stamp) |> rr_point()
-  m2 <- rr_point(df, colour = behaviour)
+  # as tiles, whose tables are the subject (a layer sent whole has none)
+  m1 <- rr_path(df, group = vessel_id, time = time_stamp, whole = FALSE) |> rr_point(whole = FALSE)
+  m2 <- rr_point(df, colour = behaviour, whole = FALSE)
   attr(m1, "port") <- port
   attr(m2, "port") <- port
   rlang::with_interactive(print(m1))
@@ -1589,7 +1590,7 @@ test_that("a time panel's spans: the whole series of raw pings, or a column's ru
   expect_equal(tp$vessels[[2]]$span, "s1")
   expect_error(rr_time(d, speed, by = vid, span = "nope"), "`span`: no column nope")
   # the layers whose features carry the vessel and a time, which the page filters to the vessel and span
-  ml <- d |> rr_path(group = vid, time = time, colour = behaviour) |> rr_point(colour = speed) |> rr_time(speed)
+  ml <- d |> rr_path(group = vid, time = time, colour = behaviour, whole = FALSE) |> rr_point(colour = speed) |> rr_time(speed)
   expect_equal(
     ml$config$time$layers,
     list(

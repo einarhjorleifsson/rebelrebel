@@ -1,3 +1,15 @@
+# rebelrebel 2026.11.11.4
+
+* A layer function sends a small layer whole by default: `whole = NULL` sends it to the page as one GeoJSON file when
+  that is at most 5 MB (some 30,000 points), else as tiles; a table of more than 50,000 rows is not tried. Up to
+  there the two were equal in a browser (fishycode's whole-or-tiles study, 18 layers of real data), and a whole layer
+  needs nothing more of R once read: a served map pans and zooms while R is busy. With R kept busy for 15 s, the
+  survey's points settled at a new view in 0.6-0.8 s whole, and in 14.5-14.6 s as tiles, once R was free. `TRUE` and
+  `FALSE` still decide; another value is an error. The example data's points, tows, paths and harbours now go whole;
+  `dansk`'s 395,558 pings as tiles.
+* Once a map with a layer sent whole had been served, `rr_stop()`, and so a map served again on a port, stopped with
+  "values must be length 1": the layer's table, which it has none of, was listed as `NULL` among the served maps'.
+
 # rebelrebel 2026.11.11.3
 
 * A bundle's tiles are one file a layer: `rr_bundle()` writes a layer's tiles, vector tiles and elevation images

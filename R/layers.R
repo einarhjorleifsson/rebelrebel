@@ -234,7 +234,7 @@
     s$state$panel_fields[[id]] <- Filter(Negate(is.null), list(by = ctx$by, t = "rr_t"))
   }
   tbl <- dplyr::tbl(con, dplyr::sql(sprintf("SELECT * FROM %s", rows_nm)))
-  whole <- isTRUE(a$whole)
+  whole <- .rr_whole_arg(a$whole)
   sent <- if (mark == "segment") {
     .rr_send(tbl, geometry = "rr_geometry", properties = props, whole = whole, order = "rr_row")
   } else if (!is.null(ctx$geometry)) {
@@ -320,15 +320,36 @@
 }
 
 # How a layer's rows reach the page: as tiles cut by DuckDB when the page asks (rr_tiles_table()), or whole, as one
-# GeoJSON file the page reads once (`whole`). The layer's kind, its tiles or data, and the table a served map drops
-.rr_send <- function(x, geometry = "geometry", lon = NULL, lat = NULL, properties = NULL, thin = NULL, whole = FALSE,
+# GeoJSON file the page reads once (`whole`). By default (NULL) whole when its GeoJSON is at most .rr_whole_bytes,
+# measured equal to tiles in a browser up to there (fishycode's whole-or-tiles study, 2026-11-11), and needs nothing
+# more of R once read; a table of more rows than .rr_whole_rows is not tried, as its GeoJSON would be larger. The
+# layer's kind, its tiles or data, and the table a served map drops
+.rr_whole_rows <- 50000
+.rr_whole_bytes <- 5e6
+.rr_send <- function(x, geometry = "geometry", lon = NULL, lat = NULL, properties = NULL, thin = NULL, whole = NULL,
                      order = NULL) {
-  if (isTRUE(whole)) {
-    data <- .rr_geojson_table(x, geometry, lon, lat, properties, order)
-    return(list(kind = "geojson", tiles = NULL, data = data, table = NULL))
+  if (!isFALSE(whole)) {
+    n <- if (is.null(whole)) {
+      con <- .rr_con_for(x)
+      DBI::dbGetQuery(con, sprintf("SELECT count(*) AS n FROM (%s)", .rr_sql(.rr_as_lazy(x, con))))$n
+    }
+    if (isTRUE(whole) || n <= .rr_whole_rows) {
+      data <- .rr_geojson_table(x, geometry, lon, lat, properties, order)
+      if (isTRUE(whole) || attr(data, "bytes") <= .rr_whole_bytes) {
+        return(list(kind = "geojson", tiles = NULL, data = data, table = NULL))
+      }
+    }
   }
   tiles <- rr_tiles_table(x, geometry = geometry, lon = lon, lat = lat, properties = properties, thin = thin)
   list(kind = "vector", tiles = tiles, data = NULL, table = list(con = .rr_con_for(x), name = attr(tiles, "table")))
+}
+
+# `whole` as given: NULL (by size), TRUE or FALSE
+.rr_whole_arg <- function(whole) {
+  if (!is.null(whole) && !isTRUE(whole) && !isFALSE(whole)) {
+    stop("`whole` is TRUE, FALSE or NULL (whole when small, else as tiles).", call. = FALSE)
+  }
+  whole
 }
 
 # A layer's styles for its kind: a GeoJSON source has no source layer
@@ -479,9 +500,11 @@
 #' @param opacity The marks' opacity, 0-1.
 #' @param whole How the rows reach the page: `TRUE`, whole, as one GeoJSON file read once (no further fetching as the
 #'   reader zooms and pans, nothing cut at a tile's edge, one file in a bundle); `FALSE`, as vector tiles cut by
-#'   DuckDB as the page asks for them, which keep a page light however many rows there are. By default (`NULL`) as
-#'   tiles. Measured on layers of real data, the two are equal in a browser up to about 5 MB of GeoJSON (some 30,000
-#'   points); above it a whole layer is slower and heavier.
+#'   DuckDB as the page asks for them, which keep a page light however many rows there are. By default (`NULL`) whole
+#'   when its GeoJSON is at most 5 MB (some 30,000 points; a table of more than 50,000 rows is not tried), else as
+#'   tiles: measured on layers of real data, the two are equal in a browser up to about 5 MB, and a whole layer needs
+#'   nothing more of R once read, so a served map pans and zooms while R is busy. Above it a whole layer is slower and
+#'   heavier (about 50 MB of a browser's memory for each MB of GeoJSON).
 #' @param thin For points: in each tile, one point for each screen pixel, `TRUE` (each colour, each value a `choose`
 #'   list picks and each group of a time panel keeping its own), so a tile of millions of rows reaches the page as
 #'   what can be seen of them; a number of pixels for coarser cells; `FALSE` keeps every point. At the layer's
@@ -760,7 +783,7 @@ rr_path <- function(
   if (!is.null(t_s)) {
     s$state$panel_fields[[id]] <- list(by = .rr_or(grp[1], NULL), t0 = "rr_t0", t1 = "rr_t1")
   }
-  sent <- .rr_send(dplyr::tbl(con, dplyr::sql(lines_src)), properties = props, whole = isTRUE(whole))
+  sent <- .rr_send(dplyr::tbl(con, dplyr::sql(lines_src)), properties = props, whole = .rr_whole_arg(whole))
   sid <- paste0(id, "-line")
   title <- if (length(hov)) hov else if (length(intersect(pop, keys))) intersect(pop, keys)[1] else if (length(pop)) "start"
   pm <- .rr_popup_meta(unique(c(keys, cc)), ctx$dict, labels, codes)

@@ -390,7 +390,9 @@
       s$ctx_layer$cols
     )
     state$layers <- c(state$layers, list(layer))
-    state$tables <- c(state$tables, list(table))
+    if (!is.null(table)) { # a layer sent whole has none
+      state$tables <- c(state$tables, list(table))
+    }
   }
   state$boxes <- c(state$boxes, list(s$ctx_layer$box))
   lon0 <- min(vapply(state$boxes, `[[`, 1, "lon0"))

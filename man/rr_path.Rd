@@ -62,9 +62,11 @@ line (Okabe-Ito and the other defaults of \code{\link[=rr_point]{rr_point()}}).}
 
 \item{whole}{How the rows reach the page: \code{TRUE}, whole, as one GeoJSON file read once (no further fetching as the
 reader zooms and pans, nothing cut at a tile's edge, one file in a bundle); \code{FALSE}, as vector tiles cut by
-DuckDB as the page asks for them, which keep a page light however many rows there are. By default (\code{NULL}) as
-tiles. Measured on layers of real data, the two are equal in a browser up to about 5 MB of GeoJSON (some 30,000
-points); above it a whole layer is slower and heavier.}
+DuckDB as the page asks for them, which keep a page light however many rows there are. By default (\code{NULL}) whole
+when its GeoJSON is at most 5 MB (some 30,000 points; a table of more than 50,000 rows is not tried), else as
+tiles: measured on layers of real data, the two are equal in a browser up to about 5 MB, and a whole layer needs
+nothing more of R once read, so a served map pans and zooms while R is busy. Above it a whole layer is slower and
+heavier (about 50 MB of a browser's memory for each MB of GeoJSON).}
 
 \item{palette}{The colours for a column, in place of the default: a palette's name (from \code{\link[=rr_palettes]{rr_palettes()}},
 \code{palette.pals()} or \code{hcl.pals()}, written loosely: \code{"set1"} is Set 1), colours, colours named by value

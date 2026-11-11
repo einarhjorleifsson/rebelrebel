@@ -2,6 +2,11 @@
 # the colours by the data and by the call, and the one order of arguments.
 
 layer <- function(m, i = 1) m$config$layers[[i]]
+# a layer's count of features, sent whole or as tiles
+features <- function(m, i = 1) {
+  l <- m$layers[[i]]
+  attr(if (is.null(l$tiles)) l$data else l$tiles, "count")
+}
 paint <- function(m, i = 1) layer(m, i)$style[[1]]$paint
 
 test_that("every layer function takes its arguments in the plan's one order", {
@@ -213,7 +218,7 @@ test_that("a number, a date or a time is a range of bins, linked as the lists ar
   expect_match(parts[2:4], "^[0-9]+$")
   expect_equal(sum(vapply(ch$extents, `[[`, 0, "n")), rows)
   # a path is split by a range's bins, each run carrying its bin's start, which the page's range compares
-  m <- rr_map(x, choose = c(vid, speed)) |> rr_path(group = vid, time = time)
+  m <- rr_map(x, choose = c(vid, speed)) |> rr_path(group = vid, time = time, whole = FALSE)
   tb <- attr(m, "tables")[[1]]
   starts <- DBI::dbGetQuery(tb$con, sprintf("SELECT DISTINCT speed FROM %s", tb$name))$speed
   expect_true(all(starts %in% lo))
@@ -223,7 +228,7 @@ test_that("a number, a date or a time is a range of bins, linked as the lists ar
 test_that("a layer's own choose: its lists, over it alone", {
   skip_if_no_spatial()
   x <- rr_example("trawlsurvey") |> dplyr::mutate(day = as.character(as.Date(time)))
-  m <- rr_map(x) |> rr_path(group = vid, time = time, choose = day) |> rr_point(choose = c(vid, day))
+  m <- rr_map(x) |> rr_path(group = vid, time = time, choose = day, whole = FALSE) |> rr_point(choose = c(vid, day))
   expect_null(m$config$choose)
   ls <- m$config$layers
   expect_equal(vapply(ls[[1]]$choose$fields, `[[`, "", "field"), "day")
@@ -291,6 +296,31 @@ test_that("whole: a layer sent to the page as one GeoJSON file", {
   unlink(dir, recursive = TRUE)
 })
 
+test_that("whole by default when the GeoJSON is at most 5 MB, else tiles", {
+  skip_if_no_spatial()
+  # small: the survey's 8,918 points (about 1.4 MB), its tows, the harbours, and its paths
+  m <- rr_point(rr_example("trawlsurvey"), colour = behaviour, popup = c(vid, speed))
+  expect_equal(layer(m)$kind, "geojson")
+  expect_equal(layer(m)$features, 8918)
+  expect_length(attr(m, "tables"), 0) # nothing for a server to keep, or drop
+  expect_equal(layer(rr_line(rr_example("trawlsurveytows")))$kind, "geojson")
+  expect_equal(layer(rr_polygon(rr_example("dansk_harbours")))$kind, "geojson")
+  expect_equal(layer(rr_map(rr_example("trawlsurvey")) |> rr_path(group = vid, time = time))$kind, "geojson")
+  # more than 50,000 rows: tiles, the GeoJSON not tried
+  d <- rr_point(rr_example("dansk"), colour = behaviour)
+  expect_equal(layer(d)$kind, "vector")
+  expect_equal(features(d), 395558)
+  # 45,000 rows, but their labels make more than 5 MB: tiles
+  long <- data.frame(lon = -20 + (1:45000) / 1e4, lat = 64, name = strrep("x", 150))
+  tx <- rr_text(long, label = name)
+  expect_equal(layer(tx)$kind, "vector")
+  expect_equal(features(tx), 45000)
+  # `whole` decides where given, and is TRUE, FALSE or NULL
+  expect_equal(layer(rr_point(rr_example("trawlsurvey"), whole = FALSE))$kind, "vector")
+  expect_error(rr_point(rr_example("trawlsurvey"), whole = "yes"), "TRUE, FALSE or NULL")
+  expect_error(rr_path(rr_example("trawlsurvey"), group = vid, time = time, whole = NA), "TRUE, FALSE or NULL")
+})
+
 test_that("a tile holds the features in its margin: a point just past its edge is drawn by one tile", {
   skip_if_no_spatial()
   # 61 m north of a zoom-5 tile edge (66.51326 N): the tile above rounds it onto its bottom edge, where MapLibre does
@@ -349,12 +379,12 @@ test_that("lines, segments, areas and text: their style, legend and data", {
   )
   p <- rr_polygon(sfp, fill = id)
   expect_equal(vapply(layer(p)$legend, `[[`, "", "label"), c("a", "b"))
-  expect_equal(attr(p$layers[[1]]$tiles, "count"), 2L)
+  expect_equal(features(p), 2L)
   # a segment from each row's start to its end
   seg <- data.frame(lon = c(-22, -21), lat = c(64, 64.2), lon2 = c(-21.9, -20.8), lat2 = c(64.05, 64.3))
   s <- rr_segment(seg, lon_end = lon2, lat_end = lat2)
   expect_equal(layer(s)$style[[1]]$type, "line")
-  expect_equal(attr(s$layers[[1]]$tiles, "count"), 2L)
+  expect_equal(features(s), 2L)
   expect_error(rr_segment(seg, lon_end = nope, lat_end = lat2), "No column nope")
   # text: a column's values, with a halo
   tx <- rr_text(rr_example("trawlsurvey"), label = vid, size = 15)
@@ -374,11 +404,11 @@ test_that("paths: rows joined in time, a line per group, broken at silences and 
   expect_equal(l$style[[1]]$type, "line")
   expect_match(l$info, "each vessel_id joined in order of time_stamp, broken where two are more than 1 hour apart")
   # the lines of ramb's track on the same rows, as counted when the two shared the query (2026-11-10)
-  expect_equal(attr(m$layers[[1]]$tiles, "count"), 1209L)
+  expect_equal(features(m), 1209L)
   # several columns make a line's group
   t <- dplyr::mutate(dplyr::collect(rr_example("trawlsurvey")), day = format(time, "%Y-%m-%d"))
-  n_vid <- attr(rr_path(t, group = vid, time = time)$layers[[1]]$tiles, "count")
-  n_day <- attr(rr_path(t, group = c(vid, day), time = time)$layers[[1]]$tiles, "count")
+  n_vid <- features(rr_path(t, group = vid, time = time))
+  n_day <- features(rr_path(t, group = c(vid, day), time = time))
   expect_equal(n_vid, 4L)
   expect_gt(n_day, n_vid)
   expect_error(rr_path(d, group = vessel_id), "`time`")
@@ -451,7 +481,7 @@ test_that("a bundle of a layer function: its tiles to the page's zoom 14 by defa
   expect_equal(rows_k, m$layers$points$row()$rows$k[c(1, 99999, 100000, 100001)])
   expect_false(grepl("e+0", js, fixed = TRUE))
   # no maxzoom given: a vector layer's tiles to 14, as the page has them, not an error
-  m2 <- rr_point(data.frame(lon = c(10, 10.5), lat = c(56, 56.5), k = 1:2), popup = k)
+  m2 <- rr_point(data.frame(lon = c(10, 10.5), lat = c(56, 56.5), k = 1:2), popup = k, whole = FALSE)
   dir2 <- tempfile()
   rr_bundle(m2, dir2)
   a <- pm_archive(dir2, "points")
