@@ -522,7 +522,7 @@
 #' @examples
 #' \donttest{
 #' m <- rr_example("dansk") |>
-#'   rr_point(colour = c(behaviour, speed), popup = c(vessel_id, time_stamp, speed), minzoom = 9)
+#'   rr_point(colour = c(behaviour, speed), popup = c(vessel_id, time_stamp, speed))
 #' format(m)
 #' rr_map(rr_example("trawlsurveytows")) |> rr_line(name = "Tows") |> format()
 #' rr_example("dansk_harbours") |> rr_polygon(fill = "#d9822b", popup = SI_HARB) |> format()
