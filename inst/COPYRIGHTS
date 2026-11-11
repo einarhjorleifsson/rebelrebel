@@ -15,6 +15,10 @@ inst/engine/vendor/uPlot.iife.min.js, uPlot.min.css
   uPlot 1.6.30, https://github.com/leeoniya/uPlot
   MIT, Copyright (c) 2022 Leon Sorokin (LICENSE-uplot.txt).
 
+inst/engine/vendor/pmtiles.js
+  pmtiles 4.5.0 (dist/pmtiles.js), https://github.com/protomaps/PMTiles
+  BSD 3-Clause, Copyright 2021 Protomaps LLC (LICENSE-pmtiles.txt). Its specification is public domain (CC0).
+
 The example data, in inst/extdata, made by ramb's data-raw scripts; each file's sources and licence are in its own
 parquet metadata, in data-dict.yaml and on its help page, and their citations, as BibTeX, in REFERENCES.bib:
 

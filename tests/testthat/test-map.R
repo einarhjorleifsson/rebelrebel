@@ -1170,14 +1170,19 @@ test_that("a bundle: the page, its data and tiles as scripts, the tiles once for
   out <- rr_bundle(m, d, maxzoom = 1)
   expect_equal(attr(out, "tiles"), 2L) # zooms 0 and 1, once for both layers
   expect_true(attr(out, "bytes") > 0)
-  expect_false(dir.exists(file.path(d, "tiles", "relief")))
-  expect_false(dir.exists(file.path(d, "tiles", "depth", "2"))) # past maxzoom
-  js <- readLines(file.path(d, "tiles", "depth", "1", "0", "0.js"))
-  expect_length(js, 1)
-  expect_identical(
-    jsonlite::base64_dec(sub('^RB_BUNDLE\\("tiles/depth/1/0/0","(.*)"\\);$', "\\1", js)),
-    as.raw(c(1, 0, 1, 9))
-  )
+  # one archive, for both layers on the file: a PNG's, to zoom 1 (none past maxzoom), the tiles as the file holds them
+  expect_equal(list.files(file.path(d, "tiles")), "depth.pmtiles.js")
+  a <- pm_archive(d, "depth")
+  expect_equal(a$header$magic, "PMTiles")
+  expect_equal(a$header$version, 3L)
+  expect_equal(a$header$tile_type, 2L)
+  expect_equal(c(a$header$minzoom, a$header$maxzoom), c(0L, 1L))
+  expect_equal(a$header$bounds, c(-30, 60, -5, 70))
+  expect_equal(nrow(a$entries), 2)
+  expect_identical(pm_tile(a, 0, 0, 0), as.raw(c(0, 0, 0, 9)))
+  expect_identical(pm_tile(a, 1, 0, 0), as.raw(c(1, 0, 1, 9)))
+  expect_null(pm_tile(a, 2, 1, 0))
+  expect_null(a$meta$vector_layers) # an image's archive names no vector layers
   data <- paste(readLines(file.path(d, "data", "places.js"), encoding = "UTF-8"), collapse = "\n")
   expect_match(data, '^RB_BUNDLE\\("data/places",\\{')
   expect_match(data, "Þórshöfn", fixed = TRUE)
@@ -1212,8 +1217,9 @@ test_that("a bundle: the page, its data and tiles as scripts, the tiles once for
   expect_error(rr_bundle(m, d), "holds a bundle")
   rr_bundle(m, d, maxzoom = 2, overwrite = TRUE)
   expect_true(file.exists(file.path(d, "README.md")))
-  expect_true(file.exists(file.path(d, "tiles", "depth", "2", "1", "0.js")))
-  expect_true(file.exists(file.path(d, "tiles", "depth", "2", "1", "1.js")))
+  a <- pm_archive(d, "depth")
+  expect_identical(pm_tile(a, 2, 1, 0), as.raw(c(2, 1, 3, 9)))
+  expect_identical(pm_tile(a, 2, 1, 1), as.raw(c(2, 1, 2, 9)))
 
   # its arguments checked
   expect_error(rr_bundle(list(), d), "rr_map")
@@ -1248,8 +1254,38 @@ test_that("a bundle leaves out the layers a server draws, with a message, and ke
   expect_equal(config$layers[[1]]$maxzoom, 8L)
   at <- attr(rr_example("dansk_harbours") |> rr_tiles_table(properties = "SI_HARB"), "tiles_at")(8)
   expect_true(nrow(at) > 0)
-  written <- list.files(file.path(d, "tiles", "harbours", "8"), recursive = TRUE)
-  expect_setequal(written, sprintf("%.0f/%.0f.js", at$x, at$y))
+  a <- pm_archive(d, "harbours")
+  expect_equal(a$header$tile_type, 1L) # vector tiles
+  expect_equal(a$meta$vector_layers$id, "features")
+  expect_equal(a$header$maxzoom, 8L)
+  expect_setequal(pm_ids_at(a, 8), .rr_pmtiles_id(rep(8, nrow(at)), at$x, at$y))
+  m <- example_map()
+  for (i in c(1, nrow(at))) expect_identical(pm_tile(a, 8, at$x[i], at$y[i]), m$layers$harbours$tiles(8, at$x[i], at$y[i]))
+  expect_equal(list.files(file.path(d, "tiles")), "harbours.pmtiles.js")
+})
+
+test_that("a PMTiles archive: tile ids as the reference reader's, leaf directories, each tile as given", {
+  # ids from pmtiles.js 4.5.0's zxyToTileId(), the reader the page loads
+  z <- c(0, 1, 1, 1, 1, 2, 2, 7, 8, 14, 20)
+  x <- c(0, 0, 0, 1, 1, 0, 3, 68, 130, 8700, 524287)
+  y <- c(0, 0, 1, 1, 0, 0, 1, 39, 70, 5100, 0)
+  expect_equal(.rr_pmtiles_id(z, x, y), c(0, 1, 2, 3, 4, 5, 17, 19428, 77799, 318331125, 458129844906))
+  # more tiles than a leaf directory holds (4,096) under a small root: leaf directories, each tile found, given in no
+  # order
+  set.seed(1)
+  at <- expand.grid(x = 0:69, y = 0:69)
+  at <- at[sample(nrow(at)), ]
+  data <- lapply(seq_len(nrow(at)), function(i) as.raw(c(i %% 256, i %/% 256, sample(0:255, i %% 7))))
+  f <- tempfile(fileext = ".pmtiles")
+  on.exit(unlink(f))
+  .rr_pmtiles_write(rep(7, nrow(at)), at$x, at$y, data, f, c(-10, 50, 10, 60), type = "webp", name = "t", root_max = 50)
+  a <- pm_archive(f)
+  expect_true(a$leaves > 1)
+  expect_equal(a$header$tile_type, 4L)
+  expect_equal(nrow(a$entries), nrow(at))
+  for (i in c(1, 2, 500, 4097, nrow(at))) expect_identical(pm_tile(a, 7, at$x[i], at$y[i]), data[[i]])
+  expect_null(pm_tile(a, 6, 0, 0))
+  expect_null(pm_tile(a, 7, 100, 100))
 })
 
 test_that("a bundle's grid: its rows summed by cell at each level, in blocks the page reads", {

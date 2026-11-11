@@ -23,8 +23,8 @@ rr_bundle(
 
 \item{maxzoom}{The deepest zoom of the tiles written (dem, contour and vector layers), at most each layer's own;
 \code{NULL} for each layer's own, 14 for a vector layer with none, as the page has it. Past it the map draws that
-zoom's tiles larger. A lower zoom writes fewer files: \code{dansk}'s 395,558 points as tiles to zoom 14 are 4,292
-files and 90 MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.}
+zoom's tiles larger. A lower zoom writes fewer and lighter tiles: \code{dansk}'s 395,558 points as tiles to zoom 14 are
+4,292 tiles and 90 MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.}
 
 \item{fit}{A view's fit in the browser: \code{probs}, the percentiles (0-1) of the floor and the cap, with \code{n} quantiles
 from one to the other (for colours in equal shares and contour levels); \code{nodata}, an elevation that means no value
@@ -56,17 +56,26 @@ attributes.
 \code{rr_bundle()} writes an \code{\link[=rr_map]{rr_map()}} as a folder whose \code{index.html} opens in a browser with a double click, on any
 system, with no R and no server: the page with the map's config, and beside it the layers' tiles and data as script
 files (\verb{tiles/}, \verb{data/}), which a page opened as a file (\verb{file://}) may load where it may not fetch them. It needs
-the internet only for the base maps: MapLibre, maplibre-contour and uPlot are in its \code{vendor} folder.
+the internet only for the base maps: MapLibre, maplibre-contour, uPlot and pmtiles are in its \code{vendor} folder.
 }
 \details{
+A layer's tiles are one file, a \href{https://github.com/protomaps/PMTiles}{PMTiles} archive (version 3) in a script,
+\verb{tiles/<layer>.pmtiles.js}, however many tiles it holds, so a bundle is a few files to copy, zip or share. Opened
+from its folder, the page reads an archive whole on the layer's first need and keeps it, so its memory grows with
+the tiles' size: for 90-141 MB of tiles, a settled screen 1-2 s later and 300-650 MB more of Chrome's memory than a
+file a tile took. Put on a web host (http or https), the page reads only what the view needs, by range requests
+into the same file, as fast and as light as a file a tile; a host that answers no range sends it whole.
+
 What a bundle carries:
 \itemize{
 \item a geojson layer, its data;
 \item a dem or contour layer, its tiles from its \code{minzoom} to its \code{maxzoom} inside its \code{bounds}, written once for the
-layers that read one file (the \code{source} of \code{\link[=rr_tiles_mbtiles]{rr_tiles_mbtiles()}}). Past the deepest zoom written, the map draws
-that zoom's tiles larger. A view's fit (a colour's, the contours' or a shading's \code{fit}) is made in the browser from
-the layer's tiles in view, by the rules in \code{fit}, not by the layer's R function, which needs a server;
-\item a vector layer from \code{\link[=rr_tiles_table]{rr_tiles_table()}}, the tiles that hold a feature, to the deepest zoom written;
+layers that read one file (the \code{source} of \code{\link[=rr_tiles_dem]{rr_tiles_dem()}} and \code{\link[=rr_tiles_mbtiles]{rr_tiles_mbtiles()}}). Past the deepest zoom
+written, the map draws that zoom's tiles larger. A view's fit (a colour's, the contours' or a shading's \code{fit}) is
+made in the browser from the layer's tiles in view, by the rules in \code{fit}, not by the layer's R function, which
+needs a server;
+\item a vector layer from \code{\link[=rr_tiles_table]{rr_tiles_table()}} or a layer function (\code{\link[=rr_point]{rr_point()}} and the others), the tiles that hold a
+feature, to the deepest zoom written, and the rows a click shows;
 \item a time panel (\code{\link[=rr_time]{rr_time()}}), each vessel's spans, the whole and each month, a file each (\verb{time/});
 \item a grid layer named in \code{grids}, its rows: summed by cell at a few cell sizes and written in blocks of cells
 (\verb{grids/}), from which the page makes each tile, its filters applied and its cells summed in the browser, with the

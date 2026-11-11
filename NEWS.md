@@ -1,3 +1,17 @@
+# rebelrebel 2026.11.11.3
+
+* A bundle's tiles are one file a layer: `rr_bundle()` writes a layer's tiles, vector tiles and elevation images
+  alike, as one PMTiles archive (version 3) in a script, `tiles/<layer>.pmtiles.js`, in place of a script for each
+  tile, read in the page by the pmtiles library (4.5.0, BSD 3-Clause, in `vendor/`). A bundle is about a dozen files
+  however many tiles it holds: `dansk`'s points to zoom 14, 13 files where there were 4,302; a 50 m grid's elevation
+  tiles to zoom 8, 12 where there were 623. Its tiles and their bytes are the same.
+* Opened from its folder, the page reads an archive whole: for 90-141 MB of tiles, a settled screen 1-2 s later and
+  300-650 MB more of Chrome's memory than a file a tile took, and `rr_bundle()` says so of an archive over 100 MB. Put
+  on a web host (http or https), the page reads only what the view needs, by range requests into the same file
+  (base64 decodes from any multiple of four characters): as fast and as light as a file a tile, for 1.0-1.7 times its
+  bytes. A host that answers no range sends the file whole, once.
+* A bundle's base64 is decoded by the browser's own `Uint8Array.fromBase64()` where it has one.
+
 # rebelrebel 2026.11.11.2
 
 * A map printed, or served by `rr_serve()` with no `port`, takes 8790 or, when another program holds it, the next

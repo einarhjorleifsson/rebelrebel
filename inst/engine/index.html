@@ -307,9 +307,10 @@ const CONTOUR = new Set(LAYERS.filter(l => l.kind === "contour").map(l => l.id))
 const TP = CONFIG.time ?? null;
 let TS = null, TU = null, TW = null;   // the vessel's span as loaded, its chart, and the window [from, to] in seconds
 if (TP) for (const id of ["rb-time-line", "rb-time-pts", "rb-time-hover"]) SOURCES.add(id);
-// A bundle (rr_bundle()): the page opened as a file, with no server. Its meta is here; its tiles and data are script
-// files beside it, each handing its value to RB_BUNDLE(), since a page opened as a file may load a script where it may
-// not fetch(). Tiles go to MapLibre through the bundle:// protocol; layers on the same tiles share their folder
+// A bundle (rr_bundle()): the page opened as a file, with no server. Its meta is here; its tiles (an archive a source)
+// and data are script files beside it, each handing its value to RB_BUNDLE(), since a page opened as a file may load a
+// script where it may not fetch(). Tiles go to MapLibre through the bundle:// protocol; layers on the same tiles share
+// their archive
 const BUNDLE = JSON.parse(document.getElementById("bundle")?.textContent || "null");
 const bundleWait = {};
 window.RB_BUNDLE = (key, v) => { if (bundleWait[key]) bundleWait[key].v = v; };
@@ -329,12 +330,63 @@ function bundleLoad(key) {
   }) };
   return bundleWait[key].p;
 }
-const fromBase64 = s => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+const fromBase64 = s => {
+  if (Uint8Array.fromBase64) return Uint8Array.fromBase64(s).buffer;   // native, where the browser has it
+  const b = atob(s), u = new Uint8Array(b.length);
+  for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+  return u.buffer;
+};
 const bundleTiles = l => `tiles/${BUNDLE.tiles?.[l.id] ?? l.id}`;
-// a tile the bundle has no file for holds no feature: an empty tile, not an error, which would keep the coarser parent
+// A bundle's tiles: one PMTiles archive a source (tiles/<key>.pmtiles.js), a tile found in it by the pmtiles library
+// (vendor/pmtiles.js, loaded on the first need), null where the archive holds none. Opened as a file, the page reads
+// the archive's script whole and keeps its bytes. Put on a web host (http or https), it reads only what the map needs,
+// by range requests into the script: the archive is in base64, which decodes from any multiple of four characters, so
+// a range of the script is a range of the archive (its header, a directory, a tile); a host that answers no range
+// sends the whole once
+let pmLib = null;
+const loadPm = () => pmLib ??= new Promise((resolve, reject) => {
+  const s = document.createElement("script");
+  s.src = "vendor/pmtiles.js";
+  s.onload = () => window.pmtiles ? resolve(window.pmtiles) : reject(new Error("pmtiles"));
+  s.onerror = reject;
+  document.head.append(s);
+});
+const HOSTED = /^https?:$/.test(location.protocol);
+function bundleRanges(key) {
+  const url = `${key}.pmtiles.js`, pre = `RB_BUNDLE("${key}.pmtiles","`;
+  const head = new TextEncoder().encode(pre).length;   // in bytes, for a range; the text's own length for a slice
+  let whole = null;
+  return {
+    getKey: () => key,
+    getBytes: async (offset, length) => {
+      if (!whole) {
+        const a = Math.floor(offset / 3) * 4, b = Math.ceil((offset + length) / 3) * 4;
+        const r = await fetch(url, { headers: { Range: `bytes=${head + a}-${head + b - 1}` } });
+        if (!r.ok) throw new Error(`${url}: ${r.status}`);
+        const t = await r.text();
+        if (r.status === 206) {
+          const u = fromBase64(t.replace(/[^A-Za-z0-9+/=]/g, ""));   // past the archive's end, the script's own
+          return { data: u.slice(offset % 3, offset % 3 + length) };
+        }
+        whole = fromBase64(t.slice(pre.length, t.lastIndexOf('"')));
+      }
+      return { data: whole.slice(offset, offset + length) };
+    }
+  };
+}
+const bundleArchives = {};
+const bundleArchive = key => bundleArchives[key] ??= loadPm().then(pm => HOSTED ? new pm.PMTiles(bundleRanges(key))
+  : bundleLoad(`${key}.pmtiles`).then(b64 => {
+    const bytes = fromBase64(b64);
+    return new pm.PMTiles({ getKey: () => key, getBytes: async (offset, length) => ({ data: bytes.slice(offset, offset + length) }) });
+  }));
+const bundleTile = (key, z, x, y) => bundleArchive(key).then(a => a.getZxy(z, x, y)).then(t => t?.data ?? null);
+// a bundle:// address as its source's key and the tile's zoom, column and row
+const bundleUrl = url => { const s = url.slice("bundle://".length).split("/"); return [s.slice(0, -3).join("/"), ...s.slice(-3).map(Number)]; };
+// a tile the bundle does not hold holds no feature: an empty tile, not an error, which would keep the coarser parent
 // tile drawn in its place, its features over its neighbours' (each drawn twice)
 if (BUNDLE) maplibregl.addProtocol("bundle", async p => ({
-  data: await bundleLoad(p.url.slice("bundle://".length)).then(fromBase64, () => new ArrayBuffer(0))
+  data: (await bundleTile(...bundleUrl(p.url)).catch(() => null)) ?? new ArrayBuffer(0)
 }));
 // The notes (rr_serve(notes = )): only from a server that keeps them, never in a bundle. A thread's pin is red while
 // its last word is the reader's, blue once answered
@@ -601,7 +653,7 @@ const demCache = new Map();
 function demTile(l, z, x, y) {
   const key = BUNDLE ? `${bundleTiles(l)}/${z}/${x}/${y}` : l.tileUrl.replace("{z}", z).replace("{x}", x).replace("{y}", y);
   if (!demCache.has(key)) {
-    const bytes = BUNDLE ? bundleLoad(key).then(fromBase64)
+    const bytes = BUNDLE ? bundleTile(bundleTiles(l), z, x, y).then(b => b ?? Promise.reject(new Error("no tile")))
                          : fetch(key).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status)));
     demCache.set(key, bytes.then(async buf => {
       const img = await createImageBitmap(new Blob([buf]), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
@@ -1415,8 +1467,8 @@ function addLayer(l, meta) {
         const lat = t => Math.atan(Math.sinh(Math.PI * (1 - 2 * t / n))) * 180 / Math.PI;
         return !b || (x / n * 360 - 180 < b[2] && (x + 1) / n * 360 - 180 > b[0] && lat(y + 1) < b[3] && lat(y) > b[1]);
       };
-      if (BUNDLE) dem.manager.getTile = url => (inBounds(url) ? bundleLoad(url.slice("bundle://".length))
-        .then(b => ({ data: new Blob([fromBase64(b)], { type: `image/${l.format ?? "png"}` }) })) : Promise.reject())
+      if (BUNDLE) dem.manager.getTile = url => (inBounds(url) ? bundleTile(...bundleUrl(url))
+        .then(b => b ? { data: new Blob([b], { type: `image/${l.format ?? "png"}` }) } : Promise.reject()) : Promise.reject())
         .catch(() => levelTile(l));
       dem.setupMaplibre(maplibregl);
       contourDem[l.id] = dem;

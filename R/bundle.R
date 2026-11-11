@@ -6,15 +6,24 @@
 #' `rr_bundle()` writes an [rr_map()] as a folder whose `index.html` opens in a browser with a double click, on any
 #' system, with no R and no server: the page with the map's config, and beside it the layers' tiles and data as script
 #' files (`tiles/`, `data/`), which a page opened as a file (`file://`) may load where it may not fetch them. It needs
-#' the internet only for the base maps: MapLibre, maplibre-contour and uPlot are in its `vendor` folder.
+#' the internet only for the base maps: MapLibre, maplibre-contour, uPlot and pmtiles are in its `vendor` folder.
+#'
+#' A layer's tiles are one file, a [PMTiles](https://github.com/protomaps/PMTiles) archive (version 3) in a script,
+#' `tiles/<layer>.pmtiles.js`, however many tiles it holds, so a bundle is a few files to copy, zip or share. Opened
+#' from its folder, the page reads an archive whole on the layer's first need and keeps it, so its memory grows with
+#' the tiles' size: for 90-141 MB of tiles, a settled screen 1-2 s later and 300-650 MB more of Chrome's memory than a
+#' file a tile took. Put on a web host (http or https), the page reads only what the view needs, by range requests
+#' into the same file, as fast and as light as a file a tile; a host that answers no range sends it whole.
 #'
 #' What a bundle carries:
 #' * a geojson layer, its data;
 #' * a dem or contour layer, its tiles from its `minzoom` to its `maxzoom` inside its `bounds`, written once for the
-#'   layers that read one file (the `source` of [rr_tiles_mbtiles()]). Past the deepest zoom written, the map draws
-#'   that zoom's tiles larger. A view's fit (a colour's, the contours' or a shading's `fit`) is made in the browser from
-#'   the layer's tiles in view, by the rules in `fit`, not by the layer's R function, which needs a server;
-#' * a vector layer from [rr_tiles_table()], the tiles that hold a feature, to the deepest zoom written;
+#'   layers that read one file (the `source` of [rr_tiles_dem()] and [rr_tiles_mbtiles()]). Past the deepest zoom
+#'   written, the map draws that zoom's tiles larger. A view's fit (a colour's, the contours' or a shading's `fit`) is
+#'   made in the browser from the layer's tiles in view, by the rules in `fit`, not by the layer's R function, which
+#'   needs a server;
+#' * a vector layer from [rr_tiles_table()] or a layer function ([rr_point()] and the others), the tiles that hold a
+#'   feature, to the deepest zoom written, and the rows a click shows;
 #' * a time panel ([rr_time()]), each vessel's spans, the whole and each month, a file each (`time/`);
 #' * a grid layer named in `grids`, its rows: summed by cell at a few cell sizes and written in blocks of cells
 #'   (`grids/`), from which the page makes each tile, its filters applied and its cells summed in the browser, with the
@@ -29,8 +38,8 @@
 #'   `overwrite` replaces those and leaves the rest of the folder as it is.
 #' @param maxzoom The deepest zoom of the tiles written (dem, contour and vector layers), at most each layer's own;
 #'   `NULL` for each layer's own, 14 for a vector layer with none, as the page has it. Past it the map draws that
-#'   zoom's tiles larger. A lower zoom writes fewer files: `dansk`'s 395,558 points as tiles to zoom 14 are 4,292
-#'   files and 90 MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.
+#'   zoom's tiles larger. A lower zoom writes fewer and lighter tiles: `dansk`'s 395,558 points as tiles to zoom 14 are
+#'   4,292 tiles and 90 MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.
 #' @param fit A view's fit in the browser: `probs`, the percentiles (0-1) of the floor and the cap, with `n` quantiles
 #'   from one to the other (for colours in equal shares and contour levels); `nodata`, an elevation that means no value
 #'   (`NULL` for none); `slope`, a shading's intensity: `k` over the `p` percentile of the slope in degrees, kept
@@ -183,13 +192,15 @@ rr_bundle <- function(
     on <- dem[source == s]
     lcs <- config$layers[on]
     b <- if (lcs[[1]]$kind != "vector") vapply(lcs, function(lc) as.numeric(unlist(lc$bounds)), numeric(4))
+    tiles <- layers[[ids[on[1]]]]$tiles
     n_tiles <- n_tiles + .rr_map_bundle_tiles(
-      layers[[ids[on[1]]]]$tiles,
+      tiles,
       dir,
       ids[on[1]],
       min(vapply(lcs, function(lc) as.integer(.rr_or(lc$minzoom, 0L)), integer(1))),
       max(vapply(lcs, function(lc) lc$maxzoom, integer(1))),
-      if (!is.null(b)) c(min(b[1, ]), min(b[2, ]), max(b[3, ]), max(b[4, ]))
+      if (!is.null(b)) c(min(b[1, ]), min(b[2, ]), max(b[3, ]), max(b[4, ])),
+      type = if (lcs[[1]]$kind == "vector") "mvt" else .rr_or(attr(tiles, "format"), "png")
     )
     for (i in on) {
       folder[[ids[i]]] <- ids[on[1]]
@@ -322,14 +333,16 @@ rr_bundle <- function(
 }
 
 # A source's tiles from zoom z0 to z1, inside `bounds` (west, south, east, north), or with no bounds those its
-# `tiles_at` lists, each a script handing its bytes in base64 to RB_BUNDLE(): tiles/<key>/<z>/<x>/<y>.js. Its count
-.rr_map_bundle_tiles <- function(tiles, dir, key, z0, z1, bounds = NULL) {
+# `tiles_at` lists, as one PMTiles archive of `type` ("mvt", "png" or "webp") handed in base64 to RB_BUNDLE() by one
+# script, tiles/<key>.pmtiles.js: one file however many tiles (a file a tile was up to 163,322 files), read whole by
+# the page on the source's first need. Its count of tiles, none written where there are none
+.rr_map_bundle_tiles <- function(tiles, dir, key, z0, z1, bounds = NULL, type = "mvt") {
   col <- function(lon, z) min(2^z - 1, max(0, floor((lon + 180) / 360 * 2^z)))
   row <- function(lat, z) {
     r <- max(-85.0511, min(85.0511, lat)) * pi / 180
     min(2^z - 1, max(0, floor((1 - log(tan(r) + 1 / cos(r)) / pi) / 2 * 2^z)))
   }
-  n <- 0L
+  kept <- list()
   failed <- character()
   for (z in seq(z0, z1)) {
     at <- if (is.null(bounds)) {
@@ -337,31 +350,46 @@ rr_bundle <- function(
     } else {
       expand.grid(y = seq(row(bounds[4], z), row(bounds[2], z)), x = seq(col(bounds[1], z), col(bounds[3], z)))
     }
-    for (k in seq_len(nrow(at))) {
-      x <- at$x[k]
-      y <- at$y[k]
+    bytes <- lapply(seq_len(nrow(at)), function(k) {
       # a tile its function cannot make is left out, as its server would refuse it
-      t <- tryCatch(tiles(z, x, y), error = function(e) {
-        failed <<- c(failed, sprintf("%d/%.0f/%.0f (%s)", z, x, y, sub("\n.*", "", trimws(conditionMessage(e)))))
+      tryCatch(tiles(z, at$x[k], at$y[k]), error = function(e) {
+        failed <<- c(failed, sprintf("%d/%.0f/%.0f (%s)", z, at$x[k], at$y[k], sub("\n.*", "", trimws(conditionMessage(e)))))
         NULL
       })
-      if (is.null(t) || !length(t)) {
-        next
-      }
-      f <- file.path(dir, "tiles", key, z, x, paste0(y, ".js"))
-      dir.create(dirname(f), recursive = TRUE, showWarnings = FALSE)
-      writeLines(
-        sprintf('RB_BUNDLE("tiles/%s/%d/%d/%d","%s");', key, z, x, y, gsub("\n", "", jsonlite::base64_enc(t), fixed = TRUE)),
-        f
-      )
-      n <- n + 1L
+    })
+    has <- lengths(bytes) > 0
+    if (any(has)) {
+      kept[[length(kept) + 1]] <- list(z = rep(z, sum(has)), x = at$x[has], y = at$y[has], data = bytes[has])
     }
   }
   if (length(failed)) {
     message(sprintf("%s: %d tile(s) its function could not make, left out: %s.", key, length(failed),
                     paste(utils::head(failed, 5), collapse = "; ")))
   }
-  n
+  if (!length(kept)) {
+    return(0L)
+  }
+  a <- tempfile(fileext = ".pmtiles")
+  on.exit(unlink(a), add = TRUE)
+  data <- unlist(lapply(kept, `[[`, "data"), recursive = FALSE)
+  .rr_pmtiles_write(
+    unlist(lapply(kept, `[[`, "z")), unlist(lapply(kept, `[[`, "x")), unlist(lapply(kept, `[[`, "y")), data, a,
+    .rr_or(bounds, c(-180, -85.0511, 180, 85.0511)), type = type, name = key
+  )
+  dir.create(file.path(dir, "tiles"), showWarnings = FALSE)
+  f <- file.path(dir, "tiles", paste0(key, ".pmtiles.js"))
+  writeLines(
+    sprintf('RB_BUNDLE("tiles/%s.pmtiles","%s");', key,
+            gsub("\n", "", jsonlite::base64_enc(readBin(a, "raw", file.size(a))), fixed = TRUE)),
+    f
+  )
+  if (file.size(f) > 100e6) {
+    message(sprintf(paste(
+      "%s: its tiles are %.0f MB in one file, which a page opened from its folder reads whole, holding several times",
+      "that in memory; from a web host it reads only the tiles in view. A lower `maxzoom` writes fewer."
+    ), key, file.size(f) / 1e6))
+  }
+  length(data)
 }
 
 # A grid's rows for a bundle, checked against its layer: the filters it can apply (those with a column, the metric

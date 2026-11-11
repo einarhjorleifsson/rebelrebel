@@ -287,7 +287,7 @@ test_that("whole: a layer sent to the page as one GeoJSON file", {
   dir <- tempfile()
   suppressMessages(rr_bundle(m, dir))
   expect_true(file.exists(file.path(dir, "data", paste0(l$id, ".js"))))
-  expect_false(dir.exists(file.path(dir, "tiles", l$id)))
+  expect_false(file.exists(file.path(dir, "tiles", paste0(l$id, ".pmtiles.js"))))
   unlink(dir, recursive = TRUE)
 })
 
@@ -454,8 +454,9 @@ test_that("a bundle of a layer function: its tiles to the page's zoom 14 by defa
   m2 <- rr_point(data.frame(lon = c(10, 10.5), lat = c(56, 56.5), k = 1:2), popup = k)
   dir2 <- tempfile()
   rr_bundle(m2, dir2)
-  expect_true(dir.exists(file.path(dir2, "tiles", "points", "14")))
-  expect_false(dir.exists(file.path(dir2, "tiles", "points", "15")))
+  a <- pm_archive(dir2, "points")
+  expect_equal(a$header$maxzoom, 14L)
+  expect_true(length(pm_ids_at(a, 14)) > 0)
 })
 
 test_that("a click's row: names, units and descriptions from the data's dictionary or the call, codes with their labels", {
