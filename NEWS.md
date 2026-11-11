@@ -1,3 +1,18 @@
+# rebelrebel 2026.11.11.1
+
+* A bundle's rows are read in a tenth of a second: `rr_bundle()` writes a layer's rows as an array, row n at n - 1.
+  Written as an object keyed by row number, `dansk`'s 395,558 rows (18-22 MB) took Chrome 65-71 s to read, so a
+  bundle's first click waited a minute for its row; and a row numbered 100,000, 200,000 or 300,000 was keyed as R
+  prints it (`1e+05`), and a click on it found no row.
+* `rr_bundle()` writes a vector layer with no `maxzoom` to zoom 14, the page's own deepest for its tiles, where the
+  thinning stops too: the map of a layer function (`rr_point()` and the others) stopped with "its tiles' deepest zoom
+  is unknown". Past it the map draws zoom 14's tiles larger. `dansk`'s points to zoom 14 are 4,292 tiles and 90 MB;
+  `maxzoom = 12` writes 751 and 53 MB.
+* Checked: ramb's maps article draws its points layer, coloured by behaviour or by speed with a legend for each and a
+  click's popup, in 55 lines of `rb_map_layer()`; `rr_point(colour = c(behaviour, speed), popup = c(vessel_id,
+  time_stamp, speed, behaviour))` draws it in five, its points also zoomed out (thinned) where the article's needed
+  `minzoom = 10`, served and as a bundle.
+
 # rebelrebel 2026.11.11
 
 * `rr_tiles_dem()` reads a grid where it is, through terra (now in Suggests) and GDAL: a GeoTIFF, a Cloud Optimized

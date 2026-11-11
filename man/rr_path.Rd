@@ -102,7 +102,8 @@ to \code{\link[=rr_map]{rr_map()}}.}
 
 \item{visible}{Whether the layer is on when the page opens.}
 
-\item{minzoom, maxzoom}{The zooms the layer is drawn at.}
+\item{minzoom, maxzoom}{The zoom the layer is drawn from, and its tiles' deepest (14 by default), past which the map
+draws that zoom's tiles larger.}
 
 \item{...}{Not used; \code{color} is taken for \code{colour}.}
 }

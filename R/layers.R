@@ -512,7 +512,8 @@
 #' @param name,info The layer's name in the sidebar and the text behind its ⓘ.
 #' @param section The sidebar's box the layer sits in, by its title.
 #' @param visible Whether the layer is on when the page opens.
-#' @param minzoom,maxzoom The zooms the layer is drawn at.
+#' @param minzoom,maxzoom The zoom the layer is drawn from, and its tiles' deepest (14 by default), past which the map
+#'   draws that zoom's tiles larger.
 #' @param ... Not used; `color` is taken for `colour`.
 #' @return An [rr_map()] with the layer added.
 #' @seealso [rr_map()]; [rr_layer()] for a layer in MapLibre's own terms.

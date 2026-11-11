@@ -28,7 +28,9 @@
 #'   `vendor/`),
 #'   `overwrite` replaces those and leaves the rest of the folder as it is.
 #' @param maxzoom The deepest zoom of the tiles written (dem, contour and vector layers), at most each layer's own;
-#'   `NULL` for each layer's own.
+#'   `NULL` for each layer's own, 14 for a vector layer with none, as the page has it. Past it the map draws that
+#'   zoom's tiles larger. A lower zoom writes fewer files: `dansk`'s 395,558 points as tiles to zoom 14 are 4,292
+#'   files and 90 MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.
 #' @param fit A view's fit in the browser: `probs`, the percentiles (0-1) of the floor and the cap, with `n` quantiles
 #'   from one to the other (for colours in equal shares and contour levels); `nodata`, an elevation that means no value
 #'   (`NULL` for none); `slope`, a shading's intensity: `k` over the `p` percentile of the slope in degrees, kept
@@ -163,7 +165,8 @@ rr_bundle <- function(
   dem <- which(vapply(config$layers, function(l) l$kind %in% c("dem", "contour", "vector"), logical(1)))
   for (i in dem) {
     lc <- config$layers[[i]]
-    z1 <- c(unlist(lc$maxzoom), maxzoom)
+    # a vector layer with no deepest zoom: the page's own for its tiles, 14, where the thinning stops too
+    z1 <- c(unlist(lc$maxzoom) %||% if (lc$kind == "vector") 14L, maxzoom)
     if (!length(z1)) {
       stop(sprintf("Layer %s: its tiles' deepest zoom is unknown: give `maxzoom`.", lc$id), call. = FALSE)
     }
@@ -247,11 +250,13 @@ rr_bundle <- function(
       ))
       next
     }
+    # an array, row n at n - 1: a browser reads an object literal keyed by number slowly (395,558 rows of four columns
+    # took 65-71 s in Chrome, as an array 0.1 s), and the keys were written as R prints them ("1e+05")
     vals <- lapply(r$cols, function(cc) r$rows[[cc$name]])
-    rows <- stats::setNames(
-      lapply(seq_len(nrow(r$rows)), function(i) lapply(vals, function(v) if (is.na(v[i])) NULL else v[i])),
-      as.character(r$rows$rr_row)
-    )
+    rows <- vector("list", max(c(0, r$rows$rr_row)))
+    rows[as.integer(r$rows$rr_row)] <- lapply(seq_len(nrow(r$rows)), function(i) {
+      lapply(vals, function(v) if (is.na(v[i])) NULL else v[i])
+    })
     dir.create(file.path(dir, "data"), showWarnings = FALSE)
     writeLines(
       enc2utf8(sprintf('RB_BUNDLE("data/%s_rows",%s);', lc$id, .rr_map_json(list(cols = r$cols, rows = rows)))),

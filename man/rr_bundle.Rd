@@ -22,7 +22,9 @@ rr_bundle(
 \code{overwrite} replaces those and leaves the rest of the folder as it is.}
 
 \item{maxzoom}{The deepest zoom of the tiles written (dem, contour and vector layers), at most each layer's own;
-\code{NULL} for each layer's own.}
+\code{NULL} for each layer's own, 14 for a vector layer with none, as the page has it. Past it the map draws that
+zoom's tiles larger. A lower zoom writes fewer files: \code{dansk}'s 395,558 points as tiles to zoom 14 are 4,292
+files and 90 MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.}
 
 \item{fit}{A view's fit in the browser: \code{probs}, the percentiles (0-1) of the floor and the cap, with \code{n} quantiles
 from one to the other (for colours in equal shares and contour levels); \code{nodata}, an elevation that means no value

@@ -1700,7 +1700,7 @@ function featurePopup(l, e) {
     const body = box.querySelector(".rr-row-body");
     // a bundle's rows file read on the layer's first click and kept, not read again at every click
     (BUNDLE ? (bundleRows[l.id] ??= bundleLoad(`data/${l.id}_rows`)).then(d => {
-      const v = d.rows[String(p.rr_row)];
+      const v = d.rows[p.rr_row - 1];                                // row n at n - 1
       return v ? { columns: d.cols.map((c, i) => ({ ...c, value: v[i] ?? null, code: c.codes?.[String(v[i])] })) } : null;
     }) : fetch(`/row/${l.id}/${p.rr_row}`).then(r => r.ok ? r.json() : null))
       .then(r => { body.innerHTML = r ? rowHtml(r.columns) : esc(tr("rowNone")); })

@@ -422,12 +422,40 @@ test_that("a click shows the row: read from the server by its number, or from a 
   js <- readLines(file.path(dir, "data", "points_rows.js"), encoding = "UTF-8")
   expect_match(js[1], '^RB_BUNDLE\\("data/points_rows",')
   b <- jsonlite::fromJSON(sub('^RB_BUNDLE\\("data/points_rows",(.*)\\);$', "\\1", paste(js, collapse = "")), simplifyVector = FALSE)
-  expect_equal(b$rows[["1"]][[1]], "A1")
-  expect_equal(b$rows[["1"]][[5]], "https://example.org/a.jpg")
+  # an array, row n at n - 1 (an object keyed by number took Chrome a minute to read)
+  expect_length(b$rows, 2)
+  expect_equal(b$rows[[1]][[1]], "A1")
+  expect_equal(b$rows[[1]][[5]], "https://example.org/a.jpg")
+  expect_equal(b$rows[[2]][[1]], "B2")
+  expect_null(b$rows[[2]][[2]]) # missing
   # the page has the table's code and texts
   page <- .rr_map_page("{}")
   expect_match(page, "function rowHtml(cols)", fixed = TRUE)
   expect_match(page, "fetch(`/row/${l.id}/${p.rr_row}`)", fixed = TRUE)
+  expect_match(page, "d.rows[p.rr_row - 1]", fixed = TRUE)
+})
+
+test_that("a bundle of a layer function: its tiles to the page's zoom 14 by default, its rows by number past 99,999", {
+  skip_if_no_spatial()
+  # a row's number written as R prints it would be "1e+05", and the row lost to a click
+  n <- 100001L
+  d <- data.frame(lon = 10 + (seq_len(n) %% 1000) / 1000, lat = 56 + (seq_len(n) %/% 1000) / 1000, k = seq_len(n))
+  m <- rr_point(d, popup = k)
+  dir <- tempfile()
+  rr_bundle(m, dir, maxzoom = 0)
+  js <- paste(readLines(file.path(dir, "data", "points_rows.js"), encoding = "UTF-8"), collapse = "")
+  b <- jsonlite::fromJSON(sub('^RB_BUNDLE\\("data/points_rows",(.*)\\);$', "\\1", js), simplifyVector = FALSE)
+  expect_length(b$rows, n)
+  rows_k <- vapply(b$rows[c(1, 99999, 100000, 100001)], function(r) r[[1]], 0)
+  # the reader's numbering is the table's: row n holds the k of the nth row as the layer numbered them
+  expect_equal(rows_k, m$layers$points$row()$rows$k[c(1, 99999, 100000, 100001)])
+  expect_false(grepl("e+0", js, fixed = TRUE))
+  # no maxzoom given: a vector layer's tiles to 14, as the page has them, not an error
+  m2 <- rr_point(data.frame(lon = c(10, 10.5), lat = c(56, 56.5), k = 1:2), popup = k)
+  dir2 <- tempfile()
+  rr_bundle(m2, dir2)
+  expect_true(dir.exists(file.path(dir2, "tiles", "points", "14")))
+  expect_false(dir.exists(file.path(dir2, "tiles", "points", "15")))
 })
 
 test_that("a click's row: names, units and descriptions from the data's dictionary or the call, codes with their labels", {
