@@ -79,7 +79,7 @@ rr_time <- function(
   time = NULL,
   by = NULL,
   title = "Track",
-  port = 8790L
+  port = NULL
 ) {
   # the frames of a call that fails are released
   .rr_scope()

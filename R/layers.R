@@ -111,7 +111,7 @@
     data <- map
   }
   s <- .rr_quick(
-    map, if (!is.null(data)) .rr_data(data), a$lon, a$lat, NULL, rlang::quo(NULL), "Map", 8790L,
+    map, if (!is.null(data)) .rr_data(data), a$lon, a$lat, NULL, rlang::quo(NULL), "Map", NULL,
     groups = FALSE
   )
   ctx <- s$ctx_layer
@@ -688,7 +688,7 @@ rr_path <- function(
   }
   tcol <- .rr_one_col(rlang::enquo(time), "time")
   s <- .rr_quick(
-    map, if (!is.null(data)) .rr_data(data), lon, lat, NULL, rlang::quo(NULL), "Map", 8790L,
+    map, if (!is.null(data)) .rr_data(data), lon, lat, NULL, rlang::quo(NULL), "Map", NULL,
     groups = FALSE
   )
   ctx <- s$ctx_layer

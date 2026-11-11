@@ -8,7 +8,10 @@
 #' `rr_stop()` stops it. A grid's `meta` and a geojson layer's `data` are read once, when the server starts.
 #'
 #' @param map An [rr_map()].
-#' @param port,host Where the server listens.
+#' @param port Where the server listens: a port, or `NULL` (the default) for 8790 or, when another program holds it,
+#'   the next free port to 8889. A map served with no port replaces the last one served so, as a map served on a
+#'   port replaces the one there; the address returned says where it is.
+#' @param host Where the server listens: `127.0.0.1`, this computer only.
 #' @param open Whether to open the page: RStudio's Viewer when there is one, else a browser.
 #' @param query Settings for the first view, in the page's address (`list(lang = "is", palette = "deep")`).
 #' @param notes Opt-in, notes pinned on the map: the path of a `.geojson` file (in a folder that exists) where the
@@ -45,7 +48,7 @@
 #' }
 rr_serve <- function(
   map,
-  port = 8790L,
+  port = NULL,
   host = "127.0.0.1",
   open = interactive(),
   query = NULL,
@@ -70,16 +73,13 @@ rr_serve <- function(
     .rr_notes_utf8()
     .rr_verdicts_read(verdicts) # a file that is there must be verdicts: it is never overwritten otherwise
   }
-  port <- as.integer(port)
-  rr_stop(port)
   app <- .rr_map_app(map, notes = notes, host = host, verdicts = verdicts)
+  port <- if (is.null(port)) {
+    .rr_serve_free(host, app)
+  } else {
+    .rr_serve_on(host, as.integer(port), app)
+  }
   .rr_tiles$served[[as.character(port)]] <- attr(map, "tables")
-  .rr_maps[[as.character(port)]] <- tryCatch(
-    httpuv::startServer(host, port, app),
-    error = function(e) {
-      stop(sprintf("Port %d is taken: give another port.", port), call. = FALSE)
-    }
-  )
   url <- sprintf(
     "http://%s:%d/",
     if (host == "127.0.0.1") "localhost" else host,
@@ -112,6 +112,44 @@ rr_serve <- function(
     }
   }
   invisible(url)
+}
+
+# The port a map served with no port took last
+.rr_serve_last <- new.env(parent = emptyenv())
+
+# A map on a port named: the map there replaced, a port another program holds an error
+.rr_serve_on <- function(host, port, app) {
+  if (length(port) != 1 || is.na(port)) {
+    stop("`port` is one port, or NULL for a free one.", call. = FALSE)
+  }
+  rr_stop(port)
+  server <- tryCatch(httpuv::startServer(host, port, app, quiet = TRUE), error = function(e) NULL)
+  if (is.null(server)) {
+    stop(sprintf("Port %d is taken: give another port, or none for a free one.", port), call. = FALSE)
+  }
+  .rr_maps[[as.character(port)]] <- server
+  port
+}
+
+# A map with no port named: on the port the last such map took, else on 8790 or the next free port. A map
+# served on a port named is never replaced here: its port is skipped as another program's is
+.rr_serve_free <- function(host, app, ports = 8790:8889) {
+  last <- .rr_serve_last$port
+  if (!is.null(last) && exists(as.character(last), envir = .rr_maps, inherits = FALSE)) {
+    ports <- unique(c(last, ports))
+  } else {
+    last <- NULL
+  }
+  for (p in setdiff(ports, setdiff(as.integer(ls(.rr_maps)), last))) {
+    rr_stop(p)
+    server <- tryCatch(httpuv::startServer(host, p, app, quiet = TRUE), error = function(e) NULL)
+    if (!is.null(server)) {
+      .rr_maps[[as.character(p)]] <- server
+      .rr_serve_last$port <- p
+      return(p)
+    }
+  }
+  stop(sprintf("No port free from %d to %d: give one in `port`.", min(ports), max(ports)), call. = FALSE)
 }
 
 #' @rdname rr_serve

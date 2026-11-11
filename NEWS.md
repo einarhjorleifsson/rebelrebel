@@ -1,3 +1,12 @@
+# rebelrebel 2026.11.11.2
+
+* A map printed, or served by `rr_serve()` with no `port`, takes 8790 or, when another program holds it, the next
+  free port to 8889: it stopped with "Port 8790 is taken: give another port" though no port had been given, as when
+  another local service listened on 8790. Printed again, a map replaces the last one served with no port, where it
+  is; a map on a port named is never replaced by one with no port. A port named and taken is still an error, and
+  httpuv's own line ("createTcpServer: address already in use") is no longer printed before it. `rr_serve(port = )`
+  and `rr_time(port = )` default to `NULL`; a layer function sets no port.
+
 # rebelrebel 2026.11.11.1
 
 * A bundle's rows are read in a tenth of a second: `rr_bundle()` writes a layer's rows as an array, row n at n - 1.

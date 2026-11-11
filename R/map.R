@@ -710,7 +710,7 @@ rr_map <- function(
     return(structure(
       list(config = list(title = title), layers = list()),
       class = "rr_map",
-      quick = list(pending = list(data = first, choose_q = choose_q, title = title, port = 8790L, sections = sections))
+      quick = list(pending = list(data = first, choose_q = choose_q, title = title, port = NULL, sections = sections))
     ))
   }
   choose <- rlang::eval_tidy(choose_q)
@@ -1064,9 +1064,9 @@ rr_map <- function(
 
 #' Show a map
 #'
-#' At an interactive console a map is served when printed ([rr_serve()], on the port its first layer function set,
-#' else 8790) and opens in RStudio's Viewer or a browser; elsewhere, as when a document is knitted, its title and
-#' layers are printed.
+#' At an interactive console a map is served when printed ([rr_serve()], on the port the call that started it gave,
+#' else on 8790 or the next free port) and opens in RStudio's Viewer or a browser; elsewhere, as when a document is
+#' knitted, its title and layers are printed.
 #'
 #' @param x An [rr_map()].
 #' @param ... Not used.
@@ -1074,7 +1074,7 @@ rr_map <- function(
 #' @export
 print.rr_map <- function(x, ...) {
   if (rlang::is_interactive()) {
-    rr_serve(x, port = .rr_or(attr(x, "port"), 8790L))
+    rr_serve(x, port = attr(x, "port"))
   } else {
     cat(format(x), sep = "\n")
   }

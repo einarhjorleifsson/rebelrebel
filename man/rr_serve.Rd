@@ -7,7 +7,7 @@
 \usage{
 rr_serve(
   map,
-  port = 8790L,
+  port = NULL,
   host = "127.0.0.1",
   open = interactive(),
   query = NULL,
@@ -20,7 +20,11 @@ rr_stop(port = NULL)
 \arguments{
 \item{map}{An \code{\link[=rr_map]{rr_map()}}.}
 
-\item{port, host}{Where the server listens.}
+\item{port}{Where the server listens: a port, or \code{NULL} (the default) for 8790 or, when another program holds it,
+the next free port to 8889. A map served with no port replaces the last one served so, as a map served on a
+port replaces the one there; the address returned says where it is.}
+
+\item{host}{Where the server listens: \verb{127.0.0.1}, this computer only.}
 
 \item{open}{Whether to open the page: RStudio's Viewer when there is one, else a browser.}
 

@@ -19,7 +19,7 @@ rr_time(
   time = NULL,
   by = NULL,
   title = "Track",
-  port = 8790L
+  port = NULL
 )
 }
 \arguments{

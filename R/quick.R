@@ -68,7 +68,7 @@
       tables = list(),
       boxes = list(),
       title = title,
-      port = as.integer(port)
+      port = if (!is.null(port)) as.integer(port)
     )
   }
   # the map's choices: the groups of the rows that start it, and the columns `choose` names

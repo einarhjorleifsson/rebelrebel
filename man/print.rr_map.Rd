@@ -18,7 +18,7 @@
 \code{x}, invisibly.
 }
 \description{
-At an interactive console a map is served when printed (\code{\link[=rr_serve]{rr_serve()}}, on the port its first layer function set,
-else 8790) and opens in RStudio's Viewer or a browser; elsewhere, as when a document is knitted, its title and
-layers are printed.
+At an interactive console a map is served when printed (\code{\link[=rr_serve]{rr_serve()}}, on the port the call that started it gave,
+else on 8790 or the next free port) and opens in RStudio's Viewer or a browser; elsewhere, as when a document is
+knitted, its title and layers are printed.
 }
