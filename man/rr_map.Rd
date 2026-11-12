@@ -45,8 +45,9 @@ English; give them in another language under the same keys, a base map's label u
 above the groups, with buttons that step through the values): a list with \code{fields}, each a \code{field}, a \code{label},
 \code{multi} (\code{TRUE}: each value a chip ticked on and off, so several show at once; else a list, "all" first, to show
 one at a time), its \code{options} (each a \code{value} for the control and the address, a \code{label}, \code{match}, the value the
-layers' features carry, \code{NULL} for none, and optionally \code{bbox}, the extent the view is fitted to) and \code{layers}
-(the ids it filters); or, for a range, \code{range} (\code{"number"}, \code{"date"} or \code{"time"}), \code{closed} and its \code{bins}
+layers' features carry, \code{NULL} for none, and optionally \code{bbox}, the extent the view is fitted to, and \code{base}, the
+id of a base map shown while this value is the one chosen: a chart's scale chosen with that chart beneath) and
+\code{layers} (the ids it filters); or, for a range, \code{range} (\code{"number"}, \code{"date"} or \code{"time"}), \code{closed} and its \code{bins}
 (each a \code{lo} and a \code{hi} as the features carry them, \code{from} and \code{to} as written, \code{n} and optionally \code{bbox}); and
 optionally \code{extents}, each a \code{key} (each field's value, or a range's bin from 0, joined by the character 31), \code{n}
 and a \code{bbox}, by which the fields are linked and the view fitted. \code{\link[=rr_map]{rr_map()}} makes it from the columns its

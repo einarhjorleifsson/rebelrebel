@@ -1252,7 +1252,10 @@ function setBase(id) {
           rest = own.filter(l => !under.includes(l));
     const layers = i < 0 ? [...next.layers, ...under, ...rest]
                          : [...next.layers.slice(0, i), ...under, ...next.layers.slice(i), ...rest];
-    return { ...next, glyphs: next.glyphs ?? prev.glyphs, sources: { ...next.sources, ...sources }, layers };
+    // glyphs only where a style has them: `glyphs: undefined` fails the style's validation, and MapLibre then keeps the
+    // old style without a word (two base maps written as styles with no glyphs never switched)
+    const glyphs = next.glyphs ?? prev.glyphs;
+    return { ...next, ...(glyphs ? { glyphs } : {}), sources: { ...next.sources, ...sources }, layers };
   } });
 }
 $("bases").addEventListener("change", e => { popup?.remove(); setBase(e.target.value); });
@@ -1341,6 +1344,7 @@ Promise.all([BUNDLE ? BUNDLE.meta : fetch("/meta").then(r => r.json()), styleLoa
   if (TP) timeSetup(q);
   if (NOTES) notesSetup();
   if (VERDICTS) verdictsSetup();
+  for (const S of SETS) choiceBase(S);   // a value chosen in the address shows its base map, unless the address names one
   const base =BASEMAPS.find(b => b.id === q.get("base"));
   if (base && base !== BASEMAPS[0]) { document.querySelector(`#bases input[value="${base.id}"]`).checked = true; setBase(base.id); }
   addressRead = true;
@@ -1654,7 +1658,18 @@ function onChoice(S, i) {
   popup?.remove();
   linkChoices(S, i);
   for (const l of OTHER) if (S.layer === null || S.layer === l.id) applyChoice(l);
+  choiceBase(S);
   zoomToChoice(S, i);
+}
+// A value whose option names a base map (`base`) shows that base map while it is the one value chosen: a chart's scale
+// chosen with that chart beneath. All, several values, or a value with none leave the base map as it is
+function choiceBase(S) {
+  S.fields.forEach((f, i) => {
+    const s = f.range ? null : chosen(S, i);
+    if (!s || s.length !== 1) return;
+    const id = f.options.find(o => o.value === s[0])?.base, r = id && document.querySelector(`#bases input[value="${CSS.escape(id)}"]`);
+    if (r && !r.checked) { r.checked = true; popup?.remove(); setBase(id); }
+  });
 }
 for (const S of SETS) S.fields.forEach((f, i) => $(chId(S, i)).addEventListener("change", () => onChoice(S, i)));
 // ‹ and › show one value: the next or previous of the one shown, else the first or the last; all shows every value

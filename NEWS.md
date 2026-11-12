@@ -1,3 +1,13 @@
+# rebelrebel 2026.11.12
+
+* A choice's option may name a base map, `base`, shown while that value is the one chosen (by the list, by ‹ and ›, or
+  in the address, unless the address names a base map of its own): a chart's scale chosen with that chart beneath, so
+  one control shows a scale's features and its chart. All, several values, or a value with none leave the base map as
+  it is.
+* Switching between two base maps written as styles with no glyphs did nothing: the page wrote `glyphs: undefined`
+  into the new style, which fails MapLibre's validation, and MapLibre then keeps the old style without a word. The
+  glyphs are now left out where neither style has them.
+
 # rebelrebel 2026.11.11.4
 
 * A layer function sends a small layer whole by default: `whole = NULL` sends it to the page as one GeoJSON file when

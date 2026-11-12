@@ -2043,3 +2043,17 @@ test_that("a server with notes: the file checked as it starts", {
   rr_serve(m, port = port, open = FALSE, notes = tempfile(fileext = ".geojson"))
   expect_equal(rr_stop(port), port)
 })
+
+test_that("a choice's option may name a base map, shown while it is the one value chosen", {
+  v <- rr_layer("areas", "vector", tiles = function(z, x, y) NULL,
+                style = list(list(id = "areas-fill", type = "fill", "source-layer" = "features")))
+  ch <- function(base) list(fields = list(list(field = "scale", multi = FALSE, layers = "areas",
+                                               options = list(list(value = "a", match = "a", base = base),
+                                                              list(value = "b", match = "b")))))
+  m <- rr_map(rr_section("g", "G", list(v)), choose = ch("chart_a"))
+  expect_identical(m$config$choose$fields[[1]]$options[[1]]$base, "chart_a")
+  expect_null(m$config$choose$fields[[1]]$options[[2]]$base)
+  expect_error(rr_map(rr_section("g", "G", list(v)), choose = ch(c("x", "y"))), "base")
+  expect_error(rr_map(rr_section("g", "G", list(v)), choose = ch(NA_character_)), "base")
+  expect_error(rr_map(rr_section("g", "G", list(v)), choose = ch("")), "base")
+})

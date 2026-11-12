@@ -649,8 +649,9 @@ rr_section <- function(id, title = id, layers, open = TRUE) {
 #'   above the groups, with buttons that step through the values): a list with `fields`, each a `field`, a `label`,
 #'   `multi` (`TRUE`: each value a chip ticked on and off, so several show at once; else a list, "all" first, to show
 #'   one at a time), its `options` (each a `value` for the control and the address, a `label`, `match`, the value the
-#'   layers' features carry, `NULL` for none, and optionally `bbox`, the extent the view is fitted to) and `layers`
-#'   (the ids it filters); or, for a range, `range` (`"number"`, `"date"` or `"time"`), `closed` and its `bins`
+#'   layers' features carry, `NULL` for none, and optionally `bbox`, the extent the view is fitted to, and `base`, the
+#'   id of a base map shown while this value is the one chosen: a chart's scale chosen with that chart beneath) and
+#'   `layers` (the ids it filters); or, for a range, `range` (`"number"`, `"date"` or `"time"`), `closed` and its `bins`
 #'   (each a `lo` and a `hi` as the features carry them, `from` and `to` as written, `n` and optionally `bbox`); and
 #'   optionally `extents`, each a `key` (each field's value, or a range's bin from 0, joined by the character 31), `n`
 #'   and a `bbox`, by which the fields are linked and the view fitted. [rr_map()] makes it from the columns its
@@ -1160,6 +1161,9 @@ format.rr_map <- function(x, ...) {
       lapply(os, function(o) {
         if (!is.null(o$bbox)) {
           o$bbox <- as.list(o$bbox)
+        }
+        if (!is.null(o$base) && !(is.character(o$base) && length(o$base) == 1 && !is.na(o$base) && nzchar(o$base))) {
+          stop(what, "'s option `base` is the id of one base map.", call. = FALSE)
         }
         o
       })
