@@ -11,7 +11,7 @@ DuckDB (ST_AsMVT()). Every feature carries kind (&quot;point&quot;, &quot;line&q
 
     <a class="navbar-brand me-2" href="../index.html">rebelrebel</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.10.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.12</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -52,7 +52,8 @@ DuckDB (<code>ST_AsMVT()</code>). Every feature carries <code>kind</code> (<code
 <span>  lat <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  properties <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  layer <span class="op">=</span> <span class="st">"features"</span>,</span>
-<span>  points <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  points <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  thin <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -85,6 +86,16 @@ factor, date or time is carried as text, a small integer as an integer and a dec
 <dd><p>The tile layer of a point on every feature (<code>ST_PointOnSurface()</code>), for the zooms where an area is
 too small to see; <code>NULL</code> for none.</p></dd>
 
+
+<dt id="arg-thin">thin<a class="anchor" aria-label="anchor" href="#arg-thin"></a></dt>
+<dd><p>Points thinned in each tile, where a screen pixel holds many: <code>NULL</code> for none, or a list of <code>px</code>, the
+side in screen pixels of the cells that each keep one point (a tile drawn 512 pixels wide); <code>by</code>, columns whose
+values each keep their own point in a cell (a colour's classes, a column chosen in the page), carried in the
+tiles only if <code>properties</code> names them; and <code>until</code>, the zoom from which only the points on one spot of a tile's own
+grid (4,096 a side, an eighth of a pixel) are dropped, the source's deepest, so that every point that can be told
+apart can be clicked there and beyond. The point kept is a cell's first in the table's order, the same every
+time. Lines and areas are kept whole.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -101,7 +112,7 @@ tiles that hold a feature (<code>x</code>, <code>y</code>), by which <code><a hr
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/attr.html" class="external-link">attr</a></span><span class="op">(</span><span class="va">tiles</span>, <span class="st">"count"</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> [1] 942</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/length.html" class="external-link">length</a></span><span class="op">(</span><span class="fu">tiles</span><span class="op">(</span><span class="fl">7</span>, <span class="fl">68</span>, <span class="fl">39</span><span class="op">)</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 1522</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> [1] 1730</span>
 <span class="r-in"><span><span class="co"># }</span></span></span>
 </code></pre></div>
     </div>

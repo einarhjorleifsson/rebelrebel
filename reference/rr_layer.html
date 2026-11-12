@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rebelrebel</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.10.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.12</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -194,10 +194,10 @@ intensity, 0-1), <code>opacity</code> (0-100: the alpha of the shading's colours
 <code>shadow</code> and <code>highlight</code> (colours as <code>"#rrggbb"</code>); MapLibre's own defaults for those not given, but an intensity of
 0.6 and a dark blue-grey shadow, <code>"#1b2a3a"</code>, as a bathymetry map in use settled on. <code>TRUE</code> takes
 every default. Each control applies as it moves, and goes into the page's address as <code>&lt;id&gt;_method</code>, <code>&lt;id&gt;_dir</code>,
-<code>&lt;id&gt;_alt</code>, <code>&lt;id&gt;_ex</code>, <code>&lt;id&gt;_op</code>, <code>&lt;id&gt;_shadow</code> and <code>&lt;id&gt;_light</code>. With <code>fit</code>, a function of the view's box as a
-colour's <code>fit</code> returning a list with <code>exaggeration</code> (0-1), the intensity can follow the view (<code>auto</code>, <code>TRUE</code> by
-default; <code>&lt;id&gt;_auto</code> in the address, which leaves out <code>&lt;id&gt;_ex</code> while it follows), until it is set by hand. Tiles
-from <code><a href="rr_tiles_dem.html">rr_tiles_dem()</a></code> carry a fit, taken when none is given.</p></dd>
+<code>&lt;id&gt;_alt</code>, <code>&lt;id&gt;_ex</code>, <code>&lt;id&gt;_op</code>, <code>&lt;id&gt;_shadow</code> and <code>&lt;id&gt;_light</code>. With <code>fit</code>, <code>TRUE</code> or a function of the view's
+box as a colour's <code>fit</code> returning a list with <code>exaggeration</code> (0-1), the intensity can follow the view (<code>auto</code>,
+<code>TRUE</code> by default; <code>&lt;id&gt;_auto</code> in the address, which leaves out <code>&lt;id&gt;_ex</code> while it follows), until it is set by
+hand. Tiles from <code><a href="rr_tiles_dem.html">rr_tiles_dem()</a></code> are fitted in the page when no fit is given.</p></dd>
 
 
 <dt id="arg-colour">colour<a class="anchor" aria-label="anchor" href="#arg-colour"></a></dt>
@@ -215,25 +215,27 @@ palette, such as <code>"magma"</code>, is offered by naming it, <code>colour = l
 not among <code>palettes</code> is put first in them), and one of your own by adding it to the map's,
 <code>rr_map(palettes = c(rr_palettes(), list(list(id = "mine", label = "mine", colors = &lt;colours&gt;))))</code>. Each control
 applies as it moves, and goes into the page's address as <code>&lt;id&gt;_pal</code>, <code>&lt;id&gt;_lo</code>, <code>&lt;id&gt;_hi</code>, <code>&lt;id&gt;_scale</code>,
-<code>&lt;id&gt;_mode</code>, <code>&lt;id&gt;_cut</code>, <code>&lt;id&gt;_cutas</code> and <code>&lt;id&gt;_cop</code>. With <code>fit</code>, a function of the view's <code>west</code>, <code>south</code>, <code>east</code>
-and <code>north</code> returning the floor and the cap for the values there (or <code>NULL</code> where there are none; or a list of
-<code>floor</code>, <code>cap</code> and <code>quantiles</code>, the values' quantiles rising, which also offers <code>scale</code> <code>"equal"</code>, each colour an
-equal share of the values in view between the floor and the cap), the page has a
-"Fit to view" button, answered by the server at <code>/fit/&lt;id&gt;?bbox=w,s,e,n</code>, and follows the view: it fits again each
-time the map settles, until a floor or cap is set by hand (<code>auto</code>, <code>TRUE</code> by default; <code>&lt;id&gt;_auto</code> in the address,
-where the floor and cap are left out while it follows). Tiles from <code><a href="rr_tiles_dem.html">rr_tiles_dem()</a></code> carry a fit, taken when
-none is given.</p></dd>
+<code>&lt;id&gt;_mode</code>, <code>&lt;id&gt;_cut</code>, <code>&lt;id&gt;_cutas</code> and <code>&lt;id&gt;_cop</code>. With <code>fit</code>, the page has a "Fit to view" button and follows
+the view: it fits again each time the map settles, until a floor or cap is set by hand (<code>auto</code>, <code>TRUE</code> by default;
+<code>&lt;id&gt;_auto</code> in the address, where the floor and cap are left out while it follows). <code>fit = TRUE</code> makes the fit in
+the page from the layer's tiles in view, with no call to R (by the rules of <code><a href="rr_bundle.html">rr_bundle()</a></code>'s <code>fit</code>): the floor
+and the cap and the values' quantiles, which also offer <code>scale</code> <code>"equal"</code>, each colour an equal share of the values
+in view between the floor and the cap. Or <code>fit</code> is a function of the view's <code>west</code>, <code>south</code>, <code>east</code> and <code>north</code>,
+answered by the server at <code>/fit/&lt;id&gt;?bbox=w,s,e,n</code>, returning the floor and the cap for the values there (or
+<code>NULL</code> where there are none; or a list of <code>floor</code>, <code>cap</code> and <code>quantiles</code>, the values' quantiles rising); a bundle
+fits in the page all the same. Tiles from <code><a href="rr_tiles_dem.html">rr_tiles_dem()</a></code> are fitted in the page when no fit is given.</p></dd>
 
 
 <dt id="arg-contours">contours<a class="anchor" aria-label="anchor" href="#arg-contours"></a></dt>
 <dd><p>For a contour layer: <code>thresholds</code>, a named list by zoom of the minor and the major interval from that
 zoom on (<code>list("6" = c(500, 1000), "9" = c(50, 200))</code>; a major line has <code>level</code> 1), and <code>multiplier</code>, by which the
-elevations are multiplied before the lines are drawn (-1 for depths, 1 by default). With <code>fit</code>, a function as a
-colour's <code>fit</code> returning a list with the <code>quantiles</code> of the values in view, the lines can follow the view (<code>auto</code>,
+elevations are multiplied before the lines are drawn (-1 for depths, 1 by default). With <code>fit</code>, <code>TRUE</code> or a
+function as a colour's <code>fit</code> returning a list with the <code>quantiles</code> of the values in view, the lines can follow the
+view (<code>auto</code>,
 <code>TRUE</code> by default; <code>&lt;id&gt;_auto</code> in the address): about a dozen levels at round values near the view's quantiles,
 so the lines fall where the area is, drawn at a step of 1, 2 or 5 times a power of ten that makes some 40 of the
-view's range; unticked, the <code>thresholds</code> and the style's filters. Tiles from <code><a href="rr_tiles_dem.html">rr_tiles_dem()</a></code> carry a fit,
-taken when none is given (by depth with a negative <code>multiplier</code>, else by elevation).</p></dd>
+view's range; unticked, the <code>thresholds</code> and the style's filters. Tiles from <code><a href="rr_tiles_dem.html">rr_tiles_dem()</a></code> are fitted in the
+page when no fit is given (by depth with a negative <code>multiplier</code>, else by elevation).</p></dd>
 
 
 <dt id="arg-state">state<a class="anchor" aria-label="anchor" href="#arg-state"></a></dt>

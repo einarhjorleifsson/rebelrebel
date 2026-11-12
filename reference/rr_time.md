@@ -30,7 +30,7 @@ rr_time(
   time = NULL,
   by = NULL,
   title = "Track",
-  port = 8790L
+  port = NULL
 )
 ```
 
@@ -172,7 +172,7 @@ m <- rr_map(d) |>
   rr_time(speed, lanes = list(behaviour = "behaviour"))
 format(m)
 #> [1] "<rr_map> Map"                                             
-#> [2] "  layers: paths (vector)"                                 
+#> [2] "  layers: paths (geojson)"                                
 #> [3] "  time panel: speed over time, 2 groups; lanes: behaviour"
 # m  # printed at the console, the map opens with the panel under it
 # }

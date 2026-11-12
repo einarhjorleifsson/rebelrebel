@@ -11,7 +11,7 @@ rr_stop() stops it. A grid's meta and a geojson layer's data are read once, when
 
     <a class="navbar-brand me-2" href="../index.html">rebelrebel</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.10.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.12</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -47,7 +47,7 @@ and opens the page. It answers while the console is idle: a map waits while R ru
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">rr_serve</span><span class="op">(</span></span>
 <span>  <span class="va">map</span>,</span>
-<span>  port <span class="op">=</span> <span class="fl">8790L</span>,</span>
+<span>  port <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  host <span class="op">=</span> <span class="st">"127.0.0.1"</span>,</span>
 <span>  open <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/interactive.html" class="external-link">interactive</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  query <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -66,8 +66,14 @@ and opens the page. It answers while the console is idle: a map waits while R ru
 <dd><p>An <code><a href="rr_map.html">rr_map()</a></code>.</p></dd>
 
 
-<dt id="arg-port-host">port, host<a class="anchor" aria-label="anchor" href="#arg-port-host"></a></dt>
-<dd><p>Where the server listens.</p></dd>
+<dt id="arg-port">port<a class="anchor" aria-label="anchor" href="#arg-port"></a></dt>
+<dd><p>Where the server listens: a port, or <code>NULL</code> (the default) for 8790 or, when another program holds it,
+the next free port to 8889. A map served with no port replaces the last one served so, as a map served on a
+port replaces the one there; the address returned says where it is.</p></dd>
+
+
+<dt id="arg-host">host<a class="anchor" aria-label="anchor" href="#arg-host"></a></dt>
+<dd><p>Where the server listens: <code>127.0.0.1</code>, this computer only.</p></dd>
 
 
 <dt id="arg-open">open<a class="anchor" aria-label="anchor" href="#arg-open"></a></dt>

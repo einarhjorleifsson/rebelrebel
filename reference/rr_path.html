@@ -13,7 +13,7 @@ the column's value changes, each run in its value's colour, and stays joined acr
 
     <a class="navbar-brand me-2" href="../index.html">rebelrebel</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.10.3</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">2026.11.12</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -59,6 +59,7 @@ the column's value changes, each run in its value's colour, and stays joined acr
 <span>  colour <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  linewidth <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  opacity <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  whole <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  palette <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  limits <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  stretch <span class="op">=</span> <span class="cn">NULL</span>,</span>
@@ -98,7 +99,8 @@ as DuckDB's GEOMETRY or WKB).</p></dd>
 
 <dt id="arg-group">group<a class="anchor" aria-label="anchor" href="#arg-group"></a></dt>
 <dd><p>The columns, written bare, whose values each have a line: one, or several, <code>c(id, leg)</code>. By default
-none, one line through all the rows (and the map's <code>choose</code> columns, so a choice shows whole lines).</p></dd>
+none, one line through all the rows (and the map's and the layer's <code>choose</code> columns, so a choice shows whole
+lines).</p></dd>
 
 
 <dt id="arg-time">time<a class="anchor" aria-label="anchor" href="#arg-time"></a></dt>
@@ -122,6 +124,16 @@ line (Okabe-Ito and the other defaults of <code><a href="rr_point.html">rr_point
 
 <dt id="arg-opacity">opacity<a class="anchor" aria-label="anchor" href="#arg-opacity"></a></dt>
 <dd><p>The marks' opacity, 0-1.</p></dd>
+
+
+<dt id="arg-whole">whole<a class="anchor" aria-label="anchor" href="#arg-whole"></a></dt>
+<dd><p>How the rows reach the page: <code>TRUE</code>, whole, as one GeoJSON file read once (no further fetching as the
+reader zooms and pans, nothing cut at a tile's edge, one file in a bundle); <code>FALSE</code>, as vector tiles cut by
+DuckDB as the page asks for them, which keep a page light however many rows there are. By default (<code>NULL</code>) whole
+when its GeoJSON is at most 5 MB (some 30,000 points; a table of more than 50,000 rows is not tried), else as
+tiles: measured on layers of real data, the two are equal in a browser up to about 5 MB, and a whole layer needs
+nothing more of R once read, so a served map pans and zooms while R is busy. Above it a whole layer is slower and
+heavier (about 50 MB of a browser's memory for each MB of GeoJSON).</p></dd>
 
 
 <dt id="arg-palette">palette<a class="anchor" aria-label="anchor" href="#arg-palette"></a></dt>
@@ -162,7 +174,12 @@ vector (<code>c("6" = "bottom trawl")</code>) or a table of code and label; by d
 
 
 <dt id="arg-choose">choose<a class="anchor" aria-label="anchor" href="#arg-choose"></a></dt>
-<dd><p>For the map's first layer from data: the columns whose values the reader picks, as for <code><a href="rr_map.html">rr_map()</a></code>.</p></dd>
+<dd><p>The columns, written bare, whose values the reader picks to show of this layer alone, each under
+the layer's name: text, a factor, a logical or a whole number (an id, a code) as a list (chips for up to 12
+values, else a list to show one at a time), a fraction, a date or a time as a range with two handles, unless the
+data's dictionary declares otherwise (as for <code><a href="rr_map.html">rr_map()</a></code>); ‹ and › step through either. Several are linked:
+each offers only the values the others leave. For choices that drive every layer with the column, give <code>choose</code>
+to <code><a href="rr_map.html">rr_map()</a></code>.</p></dd>
 
 
 <dt id="arg-name-info">name, info<a class="anchor" aria-label="anchor" href="#arg-name-info"></a></dt>
@@ -178,7 +195,8 @@ vector (<code>c("6" = "bottom trawl")</code>) or a table of code and label; by d
 
 
 <dt id="arg-minzoom-maxzoom">minzoom, maxzoom<a class="anchor" aria-label="anchor" href="#arg-minzoom-maxzoom"></a></dt>
-<dd><p>The zooms the layer is drawn at.</p></dd>
+<dd><p>The zoom the layer is drawn from, and its tiles' deepest (14 by default), past which the map
+draws that zoom's tiles larger.</p></dd>
 
 
 <dt id="arg--">...<a class="anchor" aria-label="anchor" href="#arg--"></a></dt>

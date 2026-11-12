@@ -7,7 +7,8 @@ on any system, with no R and no server: the page with the map's config,
 and beside it the layers' tiles and data as script files (`tiles/`,
 `data/`), which a page opened as a file (`file://`) may load where it
 may not fetch them. It needs the internet only for the base maps:
-MapLibre, maplibre-contour and uPlot are in its `vendor` folder.
+MapLibre, maplibre-contour, uPlot and pmtiles are in its `vendor`
+folder.
 
 ## Usage
 
@@ -39,7 +40,11 @@ rr_bundle(
 - maxzoom:
 
   The deepest zoom of the tiles written (dem, contour and vector
-  layers), at most each layer's own; `NULL` for each layer's own.
+  layers), at most each layer's own; `NULL` for each layer's own, 14 for
+  a vector layer with none, as the page has it. Past it the map draws
+  that zoom's tiles larger. A lower zoom writes fewer and lighter tiles:
+  `dansk`'s 395,558 points as tiles to zoom 14 are 4,292 tiles and 90
+  MB, to zoom 12 751 and 53 MB, to zoom 10 160 and 23 MB.
 
 - fit:
 
@@ -92,6 +97,17 @@ bundle's size in bytes (`bytes`) as attributes.
 
 ## Details
 
+A layer's tiles are one file, a
+[PMTiles](https://github.com/protomaps/PMTiles) archive (version 3) in a
+script, `tiles/<layer>.pmtiles.js`, however many tiles it holds, so a
+bundle is a few files to copy, zip or share. Opened from its folder, the
+page reads an archive whole on the layer's first need and keeps it, so
+its memory grows with the tiles' size: for 90-141 MB of tiles, a settled
+screen 1-2 s later and 300-650 MB more of Chrome's memory than a file a
+tile took. Put on a web host (http or https), the page reads only what
+the view needs, by range requests into the same file, as fast and as
+light as a file a tile; a host that answers no range sends it whole.
+
 What a bundle carries:
 
 - a geojson layer, its data;
@@ -99,6 +115,8 @@ What a bundle carries:
 - a dem or contour layer, its tiles from its `minzoom` to its `maxzoom`
   inside its `bounds`, written once for the layers that read one file
   (the `source` of
+  [`rr_tiles_dem()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_tiles_dem.md)
+  and
   [`rr_tiles_mbtiles()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_tiles_mbtiles.md)).
   Past the deepest zoom written, the map draws that zoom's tiles larger.
   A view's fit (a colour's, the contours' or a shading's `fit`) is made
@@ -106,8 +124,11 @@ What a bundle carries:
   not by the layer's R function, which needs a server;
 
 - a vector layer from
-  [`rr_tiles_table()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_tiles_table.md),
-  the tiles that hold a feature, to the deepest zoom written;
+  [`rr_tiles_table()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_tiles_table.md)
+  or a layer function
+  ([`rr_point()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_point.md)
+  and the others), the tiles that hold a feature, to the deepest zoom
+  written, and the rows a click shows;
 
 - a time panel
   ([`rr_time()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_time.md)),
@@ -147,8 +168,9 @@ d <- rr_bundle(m, file.path(tempdir(), "two_harbours"), overwrite = TRUE)
 list.files(d, recursive = TRUE)
 #>  [1] "data/places.js"                      "index.html"                         
 #>  [3] "vendor/LICENSE-maplibre-contour.txt" "vendor/LICENSE-maplibre-gl.txt"     
-#>  [5] "vendor/LICENSE-uplot.txt"            "vendor/maplibre-contour.min.js"     
-#>  [7] "vendor/maplibre-gl.css"              "vendor/maplibre-gl.js"              
-#>  [9] "vendor/uPlot.iife.min.js"            "vendor/uPlot.min.css"               
+#>  [5] "vendor/LICENSE-pmtiles.txt"          "vendor/LICENSE-uplot.txt"           
+#>  [7] "vendor/maplibre-contour.min.js"      "vendor/maplibre-gl.css"             
+#>  [9] "vendor/maplibre-gl.js"               "vendor/pmtiles.js"                  
+#> [11] "vendor/uPlot.iife.min.js"            "vendor/uPlot.min.css"               
 # utils::browseURL(file.path(d, "index.html"))  # opens it in a browser
 ```

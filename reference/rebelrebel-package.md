@@ -13,6 +13,8 @@ R package 'ramb', whose map viewer it was.
 
 Useful links:
 
+- <https://einarhjorleifsson.github.io/rebelrebel/>
+
 - <https://github.com/einarhjorleifsson/rebelrebel>
 
 - Report bugs at

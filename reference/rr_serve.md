@@ -13,7 +13,7 @@ starts.
 ``` r
 rr_serve(
   map,
-  port = 8790L,
+  port = NULL,
   host = "127.0.0.1",
   open = interactive(),
   query = NULL,
@@ -31,9 +31,17 @@ rr_stop(port = NULL)
   An
   [`rr_map()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_map.md).
 
-- port, host:
+- port:
 
-  Where the server listens.
+  Where the server listens: a port, or `NULL` (the default) for 8790 or,
+  when another program holds it, the next free port to 8889. A map
+  served with no port replaces the last one served so, as a map served
+  on a port replaces the one there; the address returned says where it
+  is.
+
+- host:
+
+  Where the server listens: `127.0.0.1`, this computer only.
 
 - open:
 

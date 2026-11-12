@@ -22,6 +22,7 @@ rr_path(
   colour = NULL,
   linewidth = NULL,
   opacity = NULL,
+  whole = NULL,
   palette = NULL,
   limits = NULL,
   stretch = NULL,
@@ -69,7 +70,8 @@ rr_path(
 
   The columns, written bare, whose values each have a line: one, or
   several, `c(id, leg)`. By default none, one line through all the rows
-  (and the map's `choose` columns, so a choice shows whole lines).
+  (and the map's and the layer's `choose` columns, so a choice shows
+  whole lines).
 
 - time:
 
@@ -96,6 +98,20 @@ rr_path(
 - opacity:
 
   The marks' opacity, 0-1.
+
+- whole:
+
+  How the rows reach the page: `TRUE`, whole, as one GeoJSON file read
+  once (no further fetching as the reader zooms and pans, nothing cut at
+  a tile's edge, one file in a bundle); `FALSE`, as vector tiles cut by
+  DuckDB as the page asks for them, which keep a page light however many
+  rows there are. By default (`NULL`) whole when its GeoJSON is at most
+  5 MB (some 30,000 points; a table of more than 50,000 rows is not
+  tried), else as tiles: measured on layers of real data, the two are
+  equal in a browser up to about 5 MB, and a whole layer needs nothing
+  more of R once read, so a served map pans and zooms while R is busy.
+  Above it a whole layer is slower and heavier (about 50 MB of a
+  browser's memory for each MB of GeoJSON).
 
 - palette:
 
@@ -149,8 +165,16 @@ rr_path(
 
 - choose:
 
-  For the map's first layer from data: the columns whose values the
-  reader picks, as for
+  The columns, written bare, whose values the reader picks to show of
+  this layer alone, each under the layer's name: text, a factor, a
+  logical or a whole number (an id, a code) as a list (chips for up to
+  12 values, else a list to show one at a time), a fraction, a date or a
+  time as a range with two handles, unless the data's dictionary
+  declares otherwise (as for
+  [`rr_map()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_map.md));
+  ‹ and › step through either. Several are linked: each offers only the
+  values the others leave. For choices that drive every layer with the
+  column, give `choose` to
   [`rr_map()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_map.md).
 
 - name, info:
@@ -167,7 +191,8 @@ rr_path(
 
 - minzoom, maxzoom:
 
-  The zooms the layer is drawn at.
+  The zoom the layer is drawn from, and its tiles' deepest (14 by
+  default), past which the map draws that zoom's tiles larger.
 
 - ...:
 

@@ -83,15 +83,29 @@ rr_map(
   at once; else a list, "all" first, to show one at a time), its
   `options` (each a `value` for the control and the address, a `label`,
   `match`, the value the layers' features carry, `NULL` for none, and
-  optionally `bbox`, the extent the view is fitted to) and `layers` (the
-  ids it filters); and optionally `extents`, each a `key` (the values of
-  every field joined by the character 31) and a `bbox`, for the view
-  where every field has one value chosen. `rr_map()` makes it from the
-  columns its `choose` names. A choice goes into the address under the
-  field's name, several values separated by commas, and nothing is
-  fetched again. For a map started from data, its columns written bare,
-  `choose = c(id, leg)`: a list each above the layers, made from the
-  data.
+  optionally `bbox`, the extent the view is fitted to, and `base`, the
+  id of a base map shown while this value is the one chosen: a chart's
+  scale chosen with that chart beneath) and `layers` (the ids it
+  filters); or, for a range, `range` (`"number"`, `"date"` or `"time"`),
+  `closed` and its `bins` (each a `lo` and a `hi` as the features carry
+  them, `from` and `to` as written, `n` and optionally `bbox`); and
+  optionally `extents`, each a `key` (each field's value, or a range's
+  bin from 0, joined by the character 31), `n` and a `bbox`, by which
+  the fields are linked and the view fitted. `rr_map()` makes it from
+  the columns its `choose` names. A choice goes into the address under
+  the field's name, several values separated by commas, a range as
+  `from..to`, and nothing is fetched again. For a map started from data,
+  its columns written bare, `choose = c(id, year)`, made from the data
+  and linked: text, a factor, a logical or a whole number (an id, a
+  code, a year as an integer) is a list of its values (chips for up to
+  12); a fraction, a date or a time is a range with two handles, over
+  each of its values where it has at most 64, else over bins between
+  [`pretty()`](https://rdrr.io/r/base/pretty.html) breaks. Where the
+  data's dictionary (data-dict.tidyverse.org's, in the parquet file's
+  metadata) gives a column's type, it decides: `number(id)`, `enum`,
+  `string` or `boolean` a list, `number`, `number(quantity)`, `date` or
+  `datetime` a range. A path is split by a range's bins, so a choice
+  shows whole runs.
 
 - sections:
 

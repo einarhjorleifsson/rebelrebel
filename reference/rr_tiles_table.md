@@ -17,7 +17,8 @@ rr_tiles_table(
   lat = NULL,
   properties = NULL,
   layer = "features",
-  points = NULL
+  points = NULL,
+  thin = NULL
 )
 ```
 
@@ -51,6 +52,20 @@ rr_tiles_table(
   The tile layer of a point on every feature (`ST_PointOnSurface()`),
   for the zooms where an area is too small to see; `NULL` for none.
 
+- thin:
+
+  Points thinned in each tile, where a screen pixel holds many: `NULL`
+  for none, or a list of `px`, the side in screen pixels of the cells
+  that each keep one point (a tile drawn 512 pixels wide); `by`, columns
+  whose values each keep their own point in a cell (a colour's classes,
+  a column chosen in the page), carried in the tiles only if
+  `properties` names them; and `until`, the zoom from which only the
+  points on one spot of a tile's own grid (4,096 a side, an eighth of a
+  pixel) are dropped, the source's deepest, so that every point that can
+  be told apart can be clicked there and beyond. The point kept is a
+  cell's first in the table's order, the same every time. Lines and
+  areas are kept whole.
+
 ## Value
 
 A function of `z`, `x`, `y` returning a tile (raw bytes), with the
@@ -69,6 +84,6 @@ tiles <- rr_tiles_table(rr_example("dansk_harbours"),
 attr(tiles, "count")
 #> [1] 942
 length(tiles(7, 68, 39))
-#> [1] 1522
+#> [1] 1730
 # }
 ```

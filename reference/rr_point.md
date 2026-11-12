@@ -23,6 +23,8 @@ rr_point(
   colour = NULL,
   size = NULL,
   opacity = NULL,
+  whole = NULL,
+  thin = TRUE,
   palette = NULL,
   limits = NULL,
   stretch = NULL,
@@ -47,6 +49,7 @@ rr_line(
   colour = NULL,
   linewidth = NULL,
   opacity = NULL,
+  whole = NULL,
   palette = NULL,
   limits = NULL,
   stretch = NULL,
@@ -75,6 +78,7 @@ rr_segment(
   colour = NULL,
   linewidth = NULL,
   opacity = NULL,
+  whole = NULL,
   palette = NULL,
   limits = NULL,
   stretch = NULL,
@@ -100,6 +104,7 @@ rr_polygon(
   fill = NULL,
   linewidth = NULL,
   opacity = NULL,
+  whole = NULL,
   palette = NULL,
   limits = NULL,
   stretch = NULL,
@@ -126,6 +131,7 @@ rr_text(
   colour = NULL,
   size = NULL,
   opacity = NULL,
+  whole = NULL,
   label,
   palette = NULL,
   limits = NULL,
@@ -178,11 +184,39 @@ rr_text(
 
 - size:
 
-  A point's diameter, a text's size, in pixels.
+  A point's diameter, a text's size, in pixels. For points, by default,
+  a size that follows the zoom: the least, 2 pixels, until the zoom at
+  which most points lie that far apart, then doubling with each zoom in,
+  as a size on the ground does, up to the most, 8; `size = c(1, 12)`
+  gives other bounds, one number a size that stays.
 
 - opacity:
 
   The marks' opacity, 0-1.
+
+- whole:
+
+  How the rows reach the page: `TRUE`, whole, as one GeoJSON file read
+  once (no further fetching as the reader zooms and pans, nothing cut at
+  a tile's edge, one file in a bundle); `FALSE`, as vector tiles cut by
+  DuckDB as the page asks for them, which keep a page light however many
+  rows there are. By default (`NULL`) whole when its GeoJSON is at most
+  5 MB (some 30,000 points; a table of more than 50,000 rows is not
+  tried), else as tiles: measured on layers of real data, the two are
+  equal in a browser up to about 5 MB, and a whole layer needs nothing
+  more of R once read, so a served map pans and zooms while R is busy.
+  Above it a whole layer is slower and heavier (about 50 MB of a
+  browser's memory for each MB of GeoJSON).
+
+- thin:
+
+  For points: in each tile, one point for each screen pixel, `TRUE`
+  (each colour, each value a `choose` list picks and each group of a
+  time panel keeping its own), so a tile of millions of rows reaches the
+  page as what can be seen of them; a number of pixels for coarser
+  cells; `FALSE` keeps every point. At the layer's deepest zoom
+  (`maxzoom`, 14 by default) and beyond, only points that would be drawn
+  on one spot are dropped.
 
 - palette:
 
@@ -236,8 +270,16 @@ rr_text(
 
 - choose:
 
-  For the map's first layer from data: the columns whose values the
-  reader picks, as for
+  The columns, written bare, whose values the reader picks to show of
+  this layer alone, each under the layer's name: text, a factor, a
+  logical or a whole number (an id, a code) as a list (chips for up to
+  12 values, else a list to show one at a time), a fraction, a date or a
+  time as a range with two handles, unless the data's dictionary
+  declares otherwise (as for
+  [`rr_map()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_map.md));
+  ‹ and › step through either. Several are linked: each offers only the
+  values the others leave. For choices that drive every layer with the
+  column, give `choose` to
   [`rr_map()`](https://einarhjorleifsson.github.io/rebelrebel/reference/rr_map.md).
 
 - name, info:
@@ -254,7 +296,8 @@ rr_text(
 
 - minzoom, maxzoom:
 
-  The zooms the layer is drawn at.
+  The zoom the layer is drawn from, and its tiles' deepest (14 by
+  default), past which the map draws that zoom's tiles larger.
 
 - ...:
 
@@ -294,12 +337,12 @@ for a layer in MapLibre's own terms.
 ``` r
 # \donttest{
 m <- rr_example("dansk") |>
-  rr_point(colour = c(behaviour, speed), popup = c(vessel_id, time_stamp, speed), minzoom = 9)
+  rr_point(colour = c(behaviour, speed), popup = c(vessel_id, time_stamp, speed))
 format(m)
 #> [1] "<rr_map> Map"              "  layers: points (vector)"
 rr_map(rr_example("trawlsurveytows")) |> rr_line(name = "Tows") |> format()
-#> [1] "<rr_map> Map"            "  layers: tows (vector)"
+#> [1] "<rr_map> Map"             "  layers: tows (geojson)"
 rr_example("dansk_harbours") |> rr_polygon(fill = "#d9822b", popup = SI_HARB) |> format()
-#> [1] "<rr_map> Map"             "  layers: areas (vector)"
+#> [1] "<rr_map> Map"              "  layers: areas (geojson)"
 # }
 ```
